@@ -4,11 +4,11 @@ This folder contains a lightweight simultaneous-move tag environment (catcher vs
 
 ## Components
 
-- `env.py` — environment definition and movement constants (`ACTIONS`, `MOVE_DELTA`, `A`, `TagEnv`).
-- `utils.py` — helpers (`encode_state`, `solve_row_player_maximin` LP solver).
+- `env/` — `tag_env.py` with environment definition and movement constants (`ACTIONS`, `MOVE_DELTA`, `A`, `TagEnv`); re-exported from `env/__init__.py`.
+- `utils/` — `state.py` (`encode_state`) and `lp.py` (`solve_row_player_maximin`); re-exported from `utils/__init__.py`.
 - `agents/` — `fp_agent.py` (`FPAgent`, empirical opponent model + 1-step best response) and `minimax_q_agent.py` (`MinimaxQAgent`, tabular zero-sum RL with LP-derived policy); re-exported from `agents/__init__.py`.
-- `train.py` — evaluation and training loops: FP vs FP, MinimaxQ self-play, MinimaxQ vs FP; `last_or_nan`.
-- `logger.py` — `ExcelLogger` for per-step logging to `chase_runs.xlsx`.
+- `train/` — evaluation and training loops: FP vs FP, MinimaxQ self-play, MinimaxQ vs FP; `last_or_nan` lives in `train/common.py`.
+- `logging_utils/` — `excel_logger.py` (`ExcelLogger`); thin compatibility shim at `logger.py` re-exports it; logs to `results/chase_run.xlsx`.
 - `chase.py` — entrypoint that wires training runs, prints metrics, and saves the Excel.
 
 ## Environment
@@ -38,11 +38,11 @@ This folder contains a lightweight simultaneous-move tag environment (catcher vs
 - Update: `Q[s,a_c,a_r] ← (1-α)Q + α(r + γ·v_next)`; marks state dirty to recompute policy next time.
 - Epsilon anneals linearly from `eps_start` to `eps_end` over `eps_decay_episodes`.
 
-## Training Loops (`train.py`)
+## Training Loops (`train/`)
 
-- `train_fp_vs_fp`: FP catcher vs FP runner.
-- `train_minimaxq_selfplay`: MinimaxQ for both roles (runner best-responds).
-- `train_minimaxq_vs_fp`: MinimaxQ catcher vs FP runner.
+- `train/fp_vs_fp.py`: FP catcher vs FP runner.
+- `train/minimaxq_selfplay.py`: MinimaxQ for both roles (runner best-responds).
+- `train/minimaxq_vs_fp.py`: MinimaxQ catcher vs FP runner.
 - `evaluate`: runs short evaluations; `run_episode` simulates a single episode.
 - `last_or_nan`: convenience extractor.
 
@@ -53,7 +53,7 @@ Each loop accepts:
 
 ## Logging (`logger.py`)
 
-- `ExcelLogger` collects per-step rows in memory and writes to `chase_runs.xlsx` (next to this folder).
+- `ExcelLogger` collects per-step rows in memory and writes to `results/chase_run.xlsx` (created under this folder).
 - Columns include run label, env params, episode/step, state before/after, actions (ids and names), reward, capture/done, move-fail flags, state ids, epsilon/value estimates, and agent metadata (mixed strategies, opponent models where applicable).
 - Sheets: one per `run_label` (max 31 chars per Excel rules).
 
@@ -75,7 +75,7 @@ Default training (in `chase.py`):
 Outputs:
 
 - Console prints final capture rate, steps, and return for each matchup/p_fail.
-- Excel: `chase_runs.xlsx` with all per-step data.
+- Excel: `results/chase_run.xlsx` with all per-step data.
 
 ## Movement Examples
 

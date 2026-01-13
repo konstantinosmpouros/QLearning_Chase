@@ -12,8 +12,8 @@ A = len(ACTIONS)
 
 MOVE_DELTA = {
     0: (0, 0),   # STAY
-    1: (1, 0),   # UP (now increases x)
-    2: (-1, 0),  # DOWN (now decreases x)
+    1: (1, 0),   # UP (increases x)
+    2: (-1, 0),  # DOWN (decreases x)
     3: (0, -1),  # LEFT
     4: (0, 1),   # RIGHT
 }
@@ -21,7 +21,7 @@ MOVE_DELTA = {
 
 @dataclass
 class TagEnv:
-    """5×5 grid Tag environment with simultaneous actions and move failure."""
+    """5x5 grid Tag environment with simultaneous actions and move failure."""
 
     size: int = 5
     p_fail: float = 0.10

@@ -118,4 +118,3 @@ class FPAgent:
             else:
                 break
         return self.rng.choice(best)[2]
-

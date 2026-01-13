@@ -26,7 +26,7 @@ def main() -> None:
     To keep runtime short, we train each matchup for only a few hundred episodes.
     Prints the final evaluation stats for each matchup.
     """
-    logger = ExcelLogger(path="chase_runs.xlsx")
+    logger = ExcelLogger()
     p_fail_values = [0.10, 0.20]      # stochastic helps capture
     episodes_fp = 2_000
     episodes_mm = 10_000

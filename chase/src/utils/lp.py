@@ -1,5 +1,5 @@
 """
-Utility helpers for the chase project.
+Linear program helper for maximin strategy.
 """
 
 from typing import List, Tuple
@@ -8,14 +8,6 @@ import numpy as np
 from scipy.optimize import linprog
 
 from env import A
-
-
-def encode_state(s: Tuple[int, int, int, int], size: int = 5) -> int:
-    """Encode 4‑tuple state to integer index for tabular arrays."""
-    cx, cy, rx, ry = s
-    c_id = cx * size + cy
-    r_id = rx * size + ry
-    return c_id * (size * size) + r_id
 
 
 def solve_row_player_maximin(Q: np.ndarray) -> Tuple[np.ndarray, float]:

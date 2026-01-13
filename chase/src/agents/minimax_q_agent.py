@@ -106,4 +106,3 @@ class MinimaxQAgent:
     def policies(self, sid: int) -> Tuple[np.ndarray, float]:
         """Return current (pi, v) for external evaluation."""
         return self._compute_policy(sid)
-

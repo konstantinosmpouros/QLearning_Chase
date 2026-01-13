@@ -23,7 +23,7 @@ class ExcelLogger:
     )
 
     def __post_init__(self) -> None:
-        base = Path(__file__).resolve().parent
+        base = Path(__file__).resolve().parent.parent.parent
         path = Path(self.path)
         if not path.is_absolute():
             path = base / path
