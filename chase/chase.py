@@ -2,12 +2,14 @@
 Entry point for running chase training experiments.
 """
 
-import matplotlib
+import sys
+from pathlib import Path
 
-matplotlib.use("Agg")  # non-GUI backend
-
-import numpy as np  # noqa: E402
-
+# Ensure imports work when running as a script from any cwd by putting project
+# root (this folder) at the front of sys.path.
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from logger import ExcelLogger
 from train import (

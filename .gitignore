@@ -1,0 +1,11 @@
+.env
+.vscode/*
+.virtual_documents/*
+.idea/*
+
+**/__pycache__/
+**/agent_venv/
+**/.ipynb_checkpoints/
+
+notebooks/*
+data/*

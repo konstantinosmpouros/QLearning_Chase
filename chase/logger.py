@@ -17,7 +17,7 @@ class ExcelLogger:
     Data is kept in memory and flushed to an xlsx file at the end of main.
     """
 
-    path: Path | str = "chase_runs.xlsx"
+    path: Path | str = "results/chase_run.xlsx"
     sheets: Dict[str, List[Dict[str, object]]] = field(
         default_factory=lambda: defaultdict(list)
     )
@@ -27,6 +27,8 @@ class ExcelLogger:
         path = Path(self.path)
         if not path.is_absolute():
             path = base / path
+        # Ensure parent directory exists (e.g., results/)
+        path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
 
     def log_step(
