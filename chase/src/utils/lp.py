@@ -14,10 +14,10 @@ def solve_row_player_maximin(Q: np.ndarray) -> Tuple[np.ndarray, float]:
     """
     Solve the row player's (catcher) maximin mixed strategy for zero‑sum payoff Q.
     We formulate a linear program:
-      max v
-      s.t. sum_a pi[a] Q[a,b] >= v for all b
-           sum_a pi[a] = 1
-           pi[a] >= 0
+        max v
+        s.t. sum_a pi[a] Q[a,b] >= v for all b
+            sum_a pi[a] = 1
+            pi[a] >= 0
     Returns (pi, v).
     If LP fails, returns uniform mixed strategy.
     """

@@ -18,6 +18,7 @@ def train_minimaxq_vs_fp(p_fail: float,
                             eval_every: int = 100,
                             seed: int = 0,
                             logger: ExcelLogger | None = None,
+                            eval_logger: ExcelLogger | None = None,
                             run_label: str = "minimaxq_vs_fp") -> Dict[str, List[float]]:
     """Train MinimaxQ catcher vs FP runner for a small number of episodes."""
     env = TagEnv(p_fail=p_fail, seed=seed)
@@ -74,7 +75,16 @@ def train_minimaxq_vs_fp(p_fail: float,
                 return int(np.random.choice(np.arange(len(ACTIONS)), p=pi_))
             def runner_policy(s_):
                 return fp_r.act(s_)
-            stats = evaluate(eval_env, catcher_policy, runner_policy, n_episodes=10)
+            stats = evaluate(
+                eval_env,
+                catcher_policy,
+                runner_policy,
+                n_episodes=10,
+                logger=eval_logger,
+                run_label=run_label,
+                p_fail=p_fail,
+                eval_at=ep,
+            )
             logs["episode"].append(ep)
             logs["capture_rate"].append(stats.capture_rate)
             logs["avg_steps"].append(stats.avg_steps_to_capture)

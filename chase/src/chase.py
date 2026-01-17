@@ -26,12 +26,13 @@ def main() -> None:
     To keep runtime short, we train each matchup for only a few hundred episodes.
     Prints the final evaluation stats for each matchup.
     """
-    logger = ExcelLogger()
-    p_fail_values = [0.10, 0.20]      # stochastic helps capture
-    episodes_fp = 2_000
+    train_logger = ExcelLogger(path="results/chase_train.xlsx")
+    eval_logger = ExcelLogger(path="results/chase_eval.xlsx")
+    p_fail_values = [0.10, 0.20]
+    episodes_fp = 10_000
     episodes_mm = 10_000
     episodes_mix = 10_000
-    eval_every_fp = 200
+    eval_every_fp = 1_000
     eval_every_mm = 1_000
     eval_every_mix = 1_000
     
@@ -42,7 +43,8 @@ def main() -> None:
             episodes=episodes_fp,
             eval_every=eval_every_fp,
             seed=0,
-            logger=logger,
+            logger=train_logger,
+            eval_logger=eval_logger,
             run_label="fp_vs_fp",
         )
         mm_logs = train_minimaxq_selfplay(
@@ -50,7 +52,8 @@ def main() -> None:
             episodes=episodes_mm,
             eval_every=eval_every_mm,
             seed=1,
-            logger=logger,
+            logger=train_logger,
+            eval_logger=eval_logger,
             run_label="minimaxq_selfplay",
         )
         mix_logs = train_minimaxq_vs_fp(
@@ -58,7 +61,8 @@ def main() -> None:
             episodes=episodes_mix,
             eval_every=eval_every_mix,
             seed=2,
-            logger=logger,
+            logger=train_logger,
+            eval_logger=eval_logger,
             run_label="minimaxq_vs_fp",
         )
         print("FP vs FP final:")
@@ -75,7 +79,8 @@ def main() -> None:
         print(f"  Avg return:     {last_or_nan(mix_logs['avg_return']):.3f}")
         print()
 
-    logger.save()
+    train_logger.save()
+    eval_logger.save()
 
 
 if __name__ == "__main__":
