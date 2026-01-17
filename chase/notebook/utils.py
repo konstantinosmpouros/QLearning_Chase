@@ -524,6 +524,109 @@ def plot_visit_heatmaps(df: pd.DataFrame, run: str, p_fail: float) -> None:
     return fig
 
 
+def animate_episode(steps_df: pd.DataFrame, run: str, p_fail: float, episode: int | None = None, capture_only: bool = True, frame_ms: int = 700):
+    """Animate a single episode (catcher vs runner) for a given run/p_fail.
+    If episode is None, pick a random capture episode (or any episode if none captured).
+    frame_ms controls speed (ms per frame)."""
+    sub = steps_df[(steps_df['run'] == run) & (steps_df['p_fail'] == p_fail)].copy()
+    if sub.empty:
+        print(f"No data for run={run}, p_fail={p_fail}")
+        return
+    sub['step'] = sub['step'].astype(int)
+    size = 5  # grid is 5x5
+
+    if episode is None:
+        caps = sub.loc[sub['capture'], 'episode'].unique()
+        if capture_only and caps.size > 0:
+            episode = int(np.random.choice(caps))
+        else:
+            episode = int(np.random.choice(sub['episode'].unique()))
+    epi = sub[sub['episode'] == episode].copy()
+    if epi.empty:
+        print(f"Episode {episode} not found for run={run}, p_fail={p_fail}")
+        return
+    epi = epi.sort_values('step')
+
+    frames = []
+    last_row = None
+    for step in epi['step'].unique():
+        g = epi[epi['step'] == step].iloc[0]
+        last_row = g
+        frames.append(
+            go.Frame(
+                data=[
+                    go.Scatter(
+                        x=[g['catcher_y']], y=[g['catcher_x']], mode='markers',
+                        marker=dict(color='red', size=16), name='Catcher',
+                        hovertemplate="Row: %{y}<br>Col: %{x}<extra>Catcher</extra>",
+                    ),
+                    go.Scatter(
+                        x=[g['runner_y']], y=[g['runner_x']], mode='markers',
+                        marker=dict(color='green', size=16), name='Runner',
+                        hovertemplate="Row: %{y}<br>Col: %{x}<extra>Runner</extra>",
+                    ),
+                ],
+                name=str(step),
+            )
+        )
+
+    # Append a final frame at post-move positions when capture/done happens.
+    if last_row is not None and (bool(last_row.get('capture')) or bool(last_row.get('done'))):
+        final_step = int(last_row['step']) + 1
+        frames.append(
+            go.Frame(
+                data=[
+                    go.Scatter(
+                        x=[last_row['catcher_y_next']], y=[last_row['catcher_x_next']],
+                        mode='markers', marker=dict(color='red', size=16), name='Catcher',
+                        hovertemplate="Row: %{y}<br>Col: %{x}<extra>Catcher</extra>",
+                    ),
+                    go.Scatter(
+                        x=[last_row['runner_y_next']], y=[last_row['runner_x_next']],
+                        mode='markers', marker=dict(color='green', size=16), name='Runner',
+                        hovertemplate="Row: %{y}<br>Col: %{x}<extra>Runner</extra>",
+                    ),
+                ],
+                name=str(final_step),
+            )
+        )
+
+    if not frames:
+        print(f"No steps to animate for episode {episode}")
+        return
+
+    axis_common = dict(range=[0, size], tick0=0, dtick=1, tickmode='linear')
+    fig = go.Figure(
+        data=frames[0].data,
+        layout=go.Layout(
+            title=dict(text=f"Animated trajectory <br>{run}, p_fail={p_fail}, episode {episode}", x=0.5, xanchor='center'),
+            xaxis=dict(**axis_common, title='Table Column'),
+            yaxis=dict(range=[size, 0], tick0=0, dtick=1, tickmode='linear', title='Table Row'),  # origin top-left
+            updatemenus=[{
+                'type': 'buttons',
+                'buttons': [
+                    {'label': 'Play', 'method': 'animate',
+                        'args': [None, {'frame': {'duration': frame_ms, 'redraw': True}, 'fromcurrent': True}]},
+                    {'label': 'Pause', 'method': 'animate',
+                        'args': [[None], {'frame': {'duration': 0}, 'mode': 'immediate', 'transition': {'duration': 0}}]},
+                ]
+            }],
+            sliders=[{
+                'currentvalue': {'prefix': 'Step: '},
+                'steps': [
+                    {'label': f.name, 'method': 'animate',
+                        'args': [[f.name], {'mode': 'immediate', 'frame': {'duration': 0, 'redraw': True}}]}
+                    for f in frames
+                ],
+            }],
+            width=600,
+            height=600,
+        ),
+        frames=frames,
+    )
+    fig.show()
+
+
 __all__ = [
     "RESULTS_PATH",
     "load_runs",
@@ -543,4 +646,5 @@ __all__ = [
     "plot_run_trends",
     "visit_density",
     "plot_visit_heatmaps",
+    "animate_episode"
 ]
