@@ -32,9 +32,9 @@ def main() -> None:
     episodes_fp = 10_000
     episodes_mm = 10_000
     episodes_mix = 10_000
-    eval_every_fp = 1_000
-    eval_every_mm = 1_000
-    eval_every_mix = 1_000
+    eval_every_fp = 50
+    eval_every_mm = 50
+    eval_every_mix = 50
     
     for p_fail in p_fail_values:
         print(f"=== Training with p_fail={p_fail:.2f} ===")
