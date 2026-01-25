@@ -9,7 +9,7 @@ if str(ROOT) not in sys.path:
 
 from env import WumpusChaseEnv, default_layout
 from logger import CSVLogger
-from train import last_or_nan, train_fp_vs_fp, train_minimaxq_selfplay, train_minimaxq_vs_fp
+from train import last_or_nan, train_fp_vs_fp, train_minimaxq_selfplay, train_minimaxq_vs_fp, train_minimaxq_vs_minimaxq
 
 
 def main() -> None:
@@ -41,11 +41,20 @@ def main() -> None:
         eval_logger=eval_logger,
         run_label="minimaxq_selfplay",
     )
-    mix_logs = train_minimaxq_vs_fp(
+    mm2_logs = train_minimaxq_vs_minimaxq(
         env,
         episodes=episodes,
         eval_every=eval_every,
         seed=2,
+        logger=train_logger,
+        eval_logger=eval_logger,
+        run_label="minimaxq_vs_minimaxq",
+    )
+    mix_logs = train_minimaxq_vs_fp(
+        env,
+        episodes=episodes,
+        eval_every=eval_every,
+        seed=3,
         logger=train_logger,
         eval_logger=eval_logger,
         run_label="minimaxq_vs_fp",
@@ -57,11 +66,17 @@ def main() -> None:
     print(f"  Avg steps:  {last_or_nan(fp_logs['avg_steps']):.3f}")
     print(f"  Avg return: {last_or_nan(fp_logs['avg_return']):.3f}")
 
-    print("MinimaxQ vs MinimaxQ final:")
+    print("MinimaxQ vs MinimaxQ (selfplay) final:")
     print(f"  Win rate:   {last_or_nan(mm_logs['win_rate']):.3f}")
     print(f"  Draw rate:  {last_or_nan(mm_logs['draw_rate']):.3f}")
     print(f"  Avg steps:  {last_or_nan(mm_logs['avg_steps']):.3f}")
     print(f"  Avg return: {last_or_nan(mm_logs['avg_return']):.3f}")
+
+    print("MinimaxQ vs MinimaxQ (two agents) final:")
+    print(f"  Win rate:   {last_or_nan(mm2_logs['win_rate']):.3f}")
+    print(f"  Draw rate:  {last_or_nan(mm2_logs['draw_rate']):.3f}")
+    print(f"  Avg steps:  {last_or_nan(mm2_logs['avg_steps']):.3f}")
+    print(f"  Avg return: {last_or_nan(mm2_logs['avg_return']):.3f}")
 
     print("MinimaxQ vs FP final:")
     print(f"  Win rate:   {last_or_nan(mix_logs['win_rate']):.3f}")

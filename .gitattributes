@@ -1,2 +1,8 @@
 chase/results/* filter=lfs diff=lfs merge=lfs -text
+wumpus_chase/results/* filter=lfs diff=lfs merge=lfs -text
 *.xlsx filter=lfs diff=lfs merge=lfs -text
+*.csv filter=lfs diff=lfs merge=lfs -text
+
+wumpus_chase/results/*.csv filter=lfs diff=lfs merge=lfs -text
+chase/results/*.xlsx filter=lfs diff=lfs merge=lfs -text
+wumpus_chase/notebook/*.ipynb filter=lfs diff=lfs merge=lfs -text
