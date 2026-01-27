@@ -11,9 +11,9 @@ Training runs log every step to Excel so you can inspect both learning and evalu
 
 - `chase/src/env/` – `TagEnv`, actions (`ACTIONS`), movement deltas, capture rules.
 - `chase/src/agents/` – `FPAgent`, `MinimaxQAgent` (+ LP solver in `utils/lp.py`), state encoding in `utils/state.py`.
-- `chase/src/train/` – training/eval loops (`fp_vs_fp`, `minimaxq_selfplay`, `minimaxq_vs_fp`), shared `evaluate`/`run_episode`.
+- `chase/src/train/` – training/eval loops (`fp_vs_fp`, `minimaxq_selfplay`, `minimaxq_vs_minimaxq`, `minimaxq_vs_fp`), shared `evaluate`/`run_episode`.
 - `chase/src/logger/` – `ExcelLogger` (writes per-step rows to Excel).
-- `chase/src/chase.py` – entrypoint wiring the three matchups.
+- `chase/src/chase.py` – entrypoint wiring the four matchups.
 - `chase/notebook/` – `analytics_train.ipynb`, `analytics_eval.ipynb`, and helper utils for analysis.
 - `results/` (created at runtime) – Excel logs for training (`chase_train.xlsx`) and evaluation (`chase_eval.xlsx`).
 
@@ -48,7 +48,7 @@ Outputs:
 - Actions: `STAY, UP, DOWN, LEFT, RIGHT`; moves clamp to grid edges.
 - Each agent’s move independently **fails** with probability `p_fail`; on fail, agent stays.
 - Capture if they land on the same cell or cross paths in a step.
-- Reward to catcher: `+1` on capture; otherwise `-step_penalty` (default 0.01). Episode ends on capture or after `t_max` (default 30) steps.
+- Reward to catcher: `+10` on capture; otherwise `-step_penalty` (default 0.01) plus shaping terms (wall penalty, move reward, distance change). Episode ends on capture or after `t_max` (default 30) steps.
 
 ## Agents (summary)
 
@@ -88,6 +88,6 @@ Outputs:
 
 ## Key defaults (code)
 
-- `TagEnv`: `size=5`, `p_fail=0.10`, `t_max=30`, `step_penalty=0.01`
+- `TagEnv`: `size=5`, `p_fail=0.10`, `t_max=30`, `step_penalty=0.01`, `capture_reward=10.0`, `wall_penalty=0.02`, `move_reward=0.01`, `dist_reward=0.02`
 - `FPAgent`: `prior=1e-3`, inherits `size`/`p_fail`
 - `MinimaxQAgent`: `gamma=0.95`, `alpha=0.10`, `eps_start=0.20`, `eps_end=0.05`, `eps_decay_episodes=5000`

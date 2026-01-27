@@ -16,6 +16,7 @@ from train import (
     last_or_nan,
     train_fp_vs_fp,
     train_minimaxq_selfplay,
+    train_minimaxq_vs_minimaxq,
     train_minimaxq_vs_fp,
 )
 
@@ -31,9 +32,11 @@ def main() -> None:
     p_fail_values = [0.10, 0.20]
     episodes_fp = 10_000
     episodes_mm = 10_000
+    episodes_mm2 = 10_000
     episodes_mix = 10_000
     eval_every_fp = 50
     eval_every_mm = 50
+    eval_every_mm2 = 50
     eval_every_mix = 50
     
     for p_fail in p_fail_values:
@@ -56,6 +59,15 @@ def main() -> None:
             eval_logger=eval_logger,
             run_label="minimaxq_selfplay",
         )
+        mm2_logs = train_minimaxq_vs_minimaxq(
+            p_fail=p_fail,
+            episodes=episodes_mm2,
+            eval_every=eval_every_mm2,
+            seed=3,
+            logger=train_logger,
+            eval_logger=eval_logger,
+            run_label="minimaxq_vs_minimaxq",
+        )
         mix_logs = train_minimaxq_vs_fp(
             p_fail=p_fail,
             episodes=episodes_mix,
@@ -69,10 +81,14 @@ def main() -> None:
         print(f"  Capture rate:   {last_or_nan(fp_logs['capture_rate']):.3f}")
         print(f"  Avg steps:      {last_or_nan(fp_logs['avg_steps']):.3f}")
         print(f"  Avg return:     {last_or_nan(fp_logs['avg_return']):.3f}")
-        print("MinimaxQ vs MinimaxQ final:")
+        print("MinimaxQ self-play final:")
         print(f"  Capture rate:   {last_or_nan(mm_logs['capture_rate']):.3f}")
         print(f"  Avg steps:      {last_or_nan(mm_logs['avg_steps']):.3f}")
         print(f"  Avg return:     {last_or_nan(mm_logs['avg_return']):.3f}")
+        print("MinimaxQ vs MinimaxQ final:")
+        print(f"  Capture rate:   {last_or_nan(mm2_logs['capture_rate']):.3f}")
+        print(f"  Avg steps:      {last_or_nan(mm2_logs['avg_steps']):.3f}")
+        print(f"  Avg return:     {last_or_nan(mm2_logs['avg_return']):.3f}")
         print("MinimaxQ vs FP final:")
         print(f"  Capture rate:   {last_or_nan(mix_logs['capture_rate']):.3f}")
         print(f"  Avg steps:      {last_or_nan(mix_logs['avg_steps']):.3f}")
