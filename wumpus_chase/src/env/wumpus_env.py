@@ -24,6 +24,10 @@ class WumpusChaseEnv:
     p_fail: float = 0.10
     t_max: int = 40
     step_penalty: float = 0.01
+    outcome_reward: float = 5.0
+    obstacle_penalty: float = 0.05
+    chase_dist_reward: float = 0.04
+    treasure_dist_reward: float = 0.03
     seed: int = 0
 
     def __post_init__(self) -> None:
@@ -63,6 +67,17 @@ class WumpusChaseEnv:
             return pos
         return (nx, ny)
 
+    def _would_hit_obstacle(self, pos: Tuple[int, int], action: int, fail: bool) -> bool:
+        if fail:
+            return False
+        dx, dy = MOVE_DELTA[action]
+        nx = min(self.size - 1, max(0, pos[0] + dx))
+        ny = min(self.size - 1, max(0, pos[1] + dy))
+        return (nx, ny) in self.layout.obstacles
+
+    def _manhattan(self, a_pos: Tuple[int, int], b_pos: Tuple[int, int]) -> int:
+        return abs(a_pos[0] - b_pos[0]) + abs(a_pos[1] - b_pos[1])
+
     def _capture_outcome(
         self,
         a_old: Tuple[int, int],
@@ -95,6 +110,9 @@ class WumpusChaseEnv:
         outcome = self._capture_outcome(a_old, b_old, a_new, b_new)
         capture = outcome is not None
 
+        a_hit_obstacle = self._would_hit_obstacle(a_old, a1, a_fail)
+        b_hit_obstacle = self._would_hit_obstacle(b_old, a2, b_fail)
+
         a_dead = (a_new == self.layout.wumpus)
         b_dead = (b_new == self.layout.wumpus)
         a_treasure = (a_new == self.layout.treasure)
@@ -119,15 +137,66 @@ class WumpusChaseEnv:
         self.a = a_new
         self.b = b_new
 
+        dist_ab_before = self._manhattan(a_old, b_old)
+        dist_ab_after = self._manhattan(a_new, b_new)
+        dist_ab_delta = dist_ab_after - dist_ab_before
+
+        a_treasure_before = self._manhattan(a_old, self.layout.treasure)
+        a_treasure_after = self._manhattan(a_new, self.layout.treasure)
+        b_treasure_before = self._manhattan(b_old, self.layout.treasure)
+        b_treasure_after = self._manhattan(b_new, self.layout.treasure)
+
         done = (outcome is not None) or (self.t >= self.t_max)
+        if outcome is None and self.t >= self.t_max:
+            outcome = "DRAW"
+
+        reward_outcome = 0.0
+        reward_step = 0.0
         if outcome == "A_WIN":
-            reward = 1.0
+            reward_outcome = self.outcome_reward
         elif outcome == "B_WIN":
-            reward = -1.0
+            reward_outcome = -self.outcome_reward
         elif outcome == "DRAW":
-            reward = 0.0
+            reward_outcome = 0.0
         else:
-            reward = -self.step_penalty
+            reward_step = -self.step_penalty
+
+        reward_obstacle = 0.0
+        if a_hit_obstacle:
+            reward_obstacle -= self.obstacle_penalty
+        if b_hit_obstacle:
+            reward_obstacle += self.obstacle_penalty
+
+        reward_chase = 0.0
+        if dist_ab_after < dist_ab_before:
+            reward_chase += self.chase_dist_reward
+        elif dist_ab_after > dist_ab_before:
+            reward_chase -= self.chase_dist_reward
+
+        if dist_ab_before <= a_treasure_before:
+            chase_weight = 1.0
+            treasure_weight = 0.5
+        else:
+            chase_weight = 0.5
+            treasure_weight = 1.0
+
+        reward_treasure = 0.0
+        if a_treasure_after < a_treasure_before:
+            reward_treasure += self.treasure_dist_reward
+        elif a_treasure_after > a_treasure_before:
+            reward_treasure -= self.treasure_dist_reward
+        if b_treasure_after < b_treasure_before:
+            reward_treasure -= self.treasure_dist_reward
+        elif b_treasure_after > b_treasure_before:
+            reward_treasure += self.treasure_dist_reward
+
+        reward = (
+            reward_outcome
+            + reward_step
+            + reward_obstacle
+            + (reward_chase * chase_weight)
+            + (reward_treasure * treasure_weight)
+        )
 
         s = (self.a[0], self.a[1], self.b[0], self.b[1])
         info = {
@@ -139,6 +208,20 @@ class WumpusChaseEnv:
             "b_treasure": b_treasure,
             "a_fail": a_fail,
             "b_fail": b_fail,
+            "a_hit_obstacle": a_hit_obstacle,
+            "b_hit_obstacle": b_hit_obstacle,
+            "dist_ab_before": dist_ab_before,
+            "dist_ab_after": dist_ab_after,
+            "dist_ab_delta": dist_ab_delta,
+            "a_treasure_before": a_treasure_before,
+            "a_treasure_after": a_treasure_after,
+            "b_treasure_before": b_treasure_before,
+            "b_treasure_after": b_treasure_after,
+            "reward_outcome": reward_outcome,
+            "reward_step": reward_step,
+            "reward_obstacle": reward_obstacle,
+            "reward_chase": reward_chase * chase_weight,
+            "reward_treasure": reward_treasure * treasure_weight,
             "a_old": a_old,
             "b_old": b_old,
             "a_new": a_new,

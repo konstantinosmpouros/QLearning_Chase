@@ -21,7 +21,17 @@ def train_minimaxq_vs_fp(
     run_label: str = "minimaxq_vs_fp",
 ) -> Dict[str, List[float]]:
     q = MinimaxQAgent(size=env.size, seed=seed + 1)
-    fp_col = FPAgent("col", env.layout, p_fail=env.p_fail, seed=seed + 2)
+    fp_col = FPAgent(
+        "col",
+        env.layout,
+        p_fail=env.p_fail,
+        step_penalty=env.step_penalty,
+        outcome_reward=env.outcome_reward,
+        obstacle_penalty=env.obstacle_penalty,
+        chase_dist_reward=env.chase_dist_reward,
+        treasure_dist_reward=env.treasure_dist_reward,
+        seed=seed + 2,
+    )
     logs = {"episode": [], "win_rate": [], "draw_rate": [], "avg_steps": [], "avg_return": []}
 
     for ep in range(1, episodes + 1):

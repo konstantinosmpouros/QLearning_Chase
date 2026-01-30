@@ -8,6 +8,8 @@ Rules (default layout):
 - Simultaneous actions with optional move failure (p_fail).
 - Win if you capture the opponent or reach the treasure first.
 - Stepping on the wumpus loses immediately.
+- Reward = outcome (±`outcome_reward`, default 5.0) plus step penalty and shaping terms (obstacle penalty, chase distance, treasure distance).
+- If the max step limit is reached, the outcome is a draw.
 - Capture if agents land on the same cell or cross each other.
   If capture is ambiguous, the winner is chosen randomly.
 
@@ -35,3 +37,4 @@ Tuning ideas
 
 - Edit the default layout in `wumpus_chase/src/env/maps.py`.
 - Change `p_fail`, `t_max`, and episodes in `wumpus_chase/src/wumpus_chase.py`.
+- Tune reward shaping in `wumpus_chase/src/env/wumpus_env.py` (`outcome_reward`, `obstacle_penalty`, `chase_dist_reward`, `treasure_dist_reward`).
