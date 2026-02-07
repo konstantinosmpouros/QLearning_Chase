@@ -159,9 +159,11 @@ This matches a flat table of size `(size^2) * (size^2)` for tabular arrays like 
 Location: `chase/src/agents/fp_agent.py`
 
 Purpose:
+
 - Uses a per-state empirical opponent action distribution and a one-step lookahead to choose actions.
 
 Key parameters:
+
 - `role`: `"catcher"` or `"runner"`
 - `size=5`
 - `p_fail=0.10` (used in expected outcomes)
@@ -169,10 +171,12 @@ Key parameters:
 - `seed` for tie-breaking RNG
 
 Internal state:
+
 - `counts_opp[sid, action]` initialized to `prior` for every action.
 - The agent updates counts with `observe(s, opp_action)`.
 
 Action selection (`act`):
+
 1) Encode state to `sid`.
 2) Compute opponent policy `opp_pi` by normalizing `counts_opp[sid]`.
 3) For each candidate action `a_self`:
@@ -190,6 +194,7 @@ Action selection (`act`):
 5) Tie-breaking: randomly pick among the lexicographically best actions.
 
 Notes:
+
 - The agent has no explicit value function and no epsilon exploration.
 - Stochasticity is only from tie-breaking.
 - The FP strategy directly accounts for move-failure probability `p_fail`.
@@ -199,10 +204,12 @@ Notes:
 Location: `chase/src/agents/minimax_q_agent.py`
 
 Purpose:
+
 - Tabular Minimax-Q for a simultaneous-move game with the catcher as the row player.
 - Uses linear programming to compute the catcher's maximin mixed strategy at each state.
 
 Key parameters:
+
 - `size=5`
 - `gamma=0.95` (discount factor)
 - `alpha=0.10` (learning rate)
@@ -210,6 +217,7 @@ Key parameters:
 - `seed` for internal RNG (`random.Random`)
 
 Internal state:
+
 - `Q[sid, a_c, a_r]` initialized to zeros.
 - `pi_cache[sid, :]` and `v_cache[sid]` for cached LP solutions.
 - `dirty[sid]` indicates cached values are stale and need recomputation.
@@ -228,11 +236,13 @@ Policy computation:
   - Cache results and clear `dirty[sid]`.
 
 Catcher action (`act_catcher`):
+
 - With probability `eps`: choose a random action.
 - Otherwise: sample from `pi`.
 - Note: sampling from `pi` uses `np.random.choice`, which relies on the global NumPy RNG (not seeded inside the class).
 
 Runner action (`best_response_runner`):
+
 - With probability `eps`: choose a random action.
 - Otherwise: compute `exp_vals = pi @ Q[sid]` (expected catcher payoff for each runner action) and take the argmin.
 
@@ -350,11 +360,12 @@ LP solver details (`utils/lp.py`):
 
 Run command:
 
-```
+```bash
 python3 chase/src/chase.py
 ```
 
 Dependencies (from `requirements.txt`):
+
 - `numpy`, `scipy`, `pandas`, `openpyxl`, `plotly`, `matplotlib`
 
 ## 7) Logging and outputs

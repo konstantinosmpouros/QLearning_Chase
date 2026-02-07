@@ -1,6 +1,6 @@
 # FPAgent
 
-Tabular fictitious-play agent with a 1‑step best-response heuristic in the simultaneous-move tag game.
+Tabular fictitious-play agent with a 1-step best-response heuristic in the simultaneous-move tag game.
 
 ## Role-aware objective
 
@@ -34,7 +34,7 @@ Tabular fictitious-play agent with a 1‑step best-response heuristic in the sim
 ## Stochasticity
 
 - Only in tie-breaking, otherwise deterministic given `counts_opp`.
-- No epsilon exploration, learning arises from opponent-play observations across episodes.
+- Tie-breaking uses `random.Random(seed)`; no epsilon exploration.
 
 ## Behavior notes
 

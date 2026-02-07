@@ -15,6 +15,7 @@ Training runs log every step to Excel so you can inspect both learning and evalu
 - `chase/src/logger/` – `ExcelLogger` (writes per-step rows to Excel).
 - `chase/src/chase.py` – entrypoint wiring the four matchups.
 - `chase/notebook/` – `analytics_train.ipynb`, `analytics_eval.ipynb`, and helper utils for analysis.
+- `chase/Chase_Analysis_Report.md` – detailed environment/agent/training report.
 - `results/` (created at runtime) – Excel logs for training (`chase_train.xlsx`) and evaluation (`chase_eval.xlsx`).
 
 ## How to run
@@ -33,14 +34,14 @@ python3 chase/src/chase.py
 Current defaults in `chase.py`:
 
 - `p_fail_values = [0.10, 0.20]`
-- Episodes: FP 10_000; MinimaxQ self-play 10_000; MinimaxQ vs FP 10_000
+- Episodes: FP 10_000; MinimaxQ self-play 10_000; MinimaxQ vs MinimaxQ 10_000; MinimaxQ vs FP 10_000
 - Eval cadence: every **50** training episodes for all matchups
-- Seeds: FP run seed=0; MinimaxQ self-play seed=1; MinimaxQ vs FP seed=2 (with offsets for eval envs)
+- Seeds: FP run seed=0; MinimaxQ self-play seed=1; MinimaxQ vs MinimaxQ seed=3; MinimaxQ vs FP seed=2 (with offsets for eval envs)
 
 Outputs:
 
 - Console: final capture rate, avg steps, avg return per matchup/p_fail.
-- Excel: `results/chase_train.xlsx` (training steps) and `results/chase_eval.xlsx` (eval steps).
+- Excel: `chase/results/chase_train.xlsx` (training steps) and `chase/results/chase_eval.xlsx` (eval steps).
 
 ## Environment basics
 
@@ -48,7 +49,7 @@ Outputs:
 - Actions: `STAY, UP, DOWN, LEFT, RIGHT`; moves clamp to grid edges.
 - Each agent’s move independently **fails** with probability `p_fail`; on fail, agent stays.
 - Capture if they land on the same cell or cross paths in a step.
-- Reward to catcher: `+10` on capture; otherwise `-step_penalty` (default 0.01) plus shaping terms (wall penalty, move reward, distance change). Episode ends on capture or after `t_max` (default 30) steps.
+- Reward to catcher: `+10` on capture; otherwise `-step_penalty` (default 0.01) plus shaping terms (wall penalty, move reward, distance change). Episode ends on capture or after `t_max` (default 30) steps. Runner reward is logged in `info` (not strictly zero-sum due to shaping).
 
 ## Agents (summary)
 
@@ -66,7 +67,7 @@ Outputs:
 
 - `ExcelLogger` captures per-step rows: run label, env params, episode/step, state before/after, actions (ids/names), reward, capture/done, move-fail flags, state ids, epsilon/value estimates, and agent metadata (mixed strategies, opponent models).
 - Sheets are named by `run_label` (truncated to Excel’s 31-char limit).
-- Training logs: `results/chase_train.xlsx`; Eval logs: `results/chase_eval.xlsx` (written at end of `chase.py` run).
+- Training logs: `chase/results/chase_train.xlsx`; Eval logs: `chase/results/chase_eval.xlsx` (written at end of `chase.py` run).
 
 ## Analysis notebooks
 

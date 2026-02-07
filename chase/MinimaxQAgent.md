@@ -7,6 +7,7 @@ Tabular Minimax-Q agent for the simultaneous-move tag game, treating the catcher
 - Maintain `Q[sid, a_c, a_r]` for catcher (row) and runner (column).
 - At each state, solve a linear program to find the catcher’s maximin mixed strategy `pi` and state value `v = max_pi min_a_r pi^T Q[:, a_r]`.
 - Runner acts as an approximate best response to `pi` (minimizes expected Q), with optional epsilon exploration.
+- The game is treated as zero-sum even though the environment reward shaping is not strictly zero-sum.
 
 ## Policy computation
 
@@ -41,11 +42,12 @@ Given transition `(sid, a_c, a_r, r, sid_next, done)`:
 
 ## Defaults (in code)
 
-- `gamma=0.95`, `alpha=0.10`, `eps_start=0.20`, `eps_end=0.05`, `eps_decay_episodes=5000`, `size=5`.
+- `gamma=0.95`, `alpha=0.10`, `eps_start=0.20`, `eps_end=0.05`, `eps_decay_episodes=5000`, `size=5`, `seed=0`.
 
 ## Behavior notes
 
 - LP solves give principled mixed strategies; caching avoids repeated solves when `Q` is unchanged.
 - Runner’s approximate best response avoids solving a second LP; good enough for this small game.
 - Sensitive to `alpha`/`eps_decay`: larger `alpha` learns faster but can oscillate; slower decay keeps exploration longer.
+- Sampling from `pi` uses `np.random.choice` (NumPy global RNG). For full reproducibility, seed NumPy as well.
 - Uses encoded state IDs (`encode_state`) so grid size changes are already handled if `size` matches the environment.
