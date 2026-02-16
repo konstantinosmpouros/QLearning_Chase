@@ -9,3 +9,6 @@
 
 notebooks/*
 data/*
+
+wumpus_chase/results/*
+chase/results/*

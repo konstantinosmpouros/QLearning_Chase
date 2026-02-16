@@ -1,2 +1,15 @@
-numpy
-scipy
+# Core numerical stack
+numpy>=1.24,<3
+scipy>=1.10,<2
+pandas>=2.0,<3
+openpyxl>=3.1,<4
+
+# Game-theoretic solvers (Nash-Q)
+nashpy>=0.0.41
+
+# Visualization / notebooks
+matplotlib>=3.7,<4
+plotly>=5.17,<6
+
+# Optional (required only for DQN training)
+torch>=2.1

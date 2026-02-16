@@ -60,6 +60,18 @@ class MinimaxQAgent:
             return self.rng.randrange(A)
         return int(np.random.choice(np.arange(A), p=pi))
 
+    def act_col(self, sid: int, eps: float) -> int:
+        """
+        Choose action for the column player while maximizing this agent's own payoff.
+
+        This computes a robust mixed policy for the column side by solving maximin
+        on the transposed payoff matrix and sampling from that policy.
+        """
+        if self.rng.random() < eps:
+            return self.rng.randrange(A)
+        pi_col, _ = solve_row_player_maximin(self.Q[sid].T)
+        return int(np.random.choice(np.arange(A), p=pi_col))
+
     def best_response_col(self, sid: int, pi: np.ndarray, eps: float) -> int:
         if self.rng.random() < eps:
             return self.rng.randrange(A)

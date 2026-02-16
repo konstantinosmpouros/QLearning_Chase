@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from env import ACTIONS, WumpusChaseEnv
+from env import ACTIONS, WumpusChaseEnvExtended
 from utils import encode_state
 
 
@@ -16,7 +16,7 @@ class EvalStats:
 
 
 def run_episode(
-    env: WumpusChaseEnv,
+    env: WumpusChaseEnvExtended,
     policy_a: Callable,
     policy_b: Callable,
     logger=None,
@@ -64,7 +64,7 @@ def run_episode(
 
 
 def evaluate(
-    env: WumpusChaseEnv,
+    env: WumpusChaseEnvExtended,
     policy_a: Callable,
     policy_b: Callable,
     n_episodes: int = 10,
