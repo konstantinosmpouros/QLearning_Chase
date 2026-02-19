@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Dict, List, Callable, Optional
+from typing import Dict, List, Callable, Optional, TYPE_CHECKING
 import time
 
 import numpy as np
@@ -29,6 +29,49 @@ from agents.dqn_agent import (
 from env.wumpus_env_extended import WumpusChaseEnvExtended, ACTIONS
 from train.common import EvalStats
 
+if TYPE_CHECKING:
+    from logger.csv_logger import CSVLogger
+
+
+def _log_dqn_step(
+    logger: Optional["CSVLogger"],
+    *,
+    run_label: str,
+    phase: str,
+    env: WumpusChaseEnvExtended,
+    episode: int,
+    state_tuple,
+    action_a: int,
+    action_b: int,
+    next_state_tuple,
+    reward: float,
+    done: bool,
+    info: dict,
+    epsilon: float,
+    agent_a: str = "dqn",
+    agent_b: str = "dqn",
+) -> None:
+    if logger is None:
+        return
+    logger.log_step(
+        run_label=run_label,
+        phase=phase,
+        env=env,
+        episode=episode,
+        step_idx=env.t,
+        state=state_tuple,
+        action_a=action_a,
+        action_b=action_b,
+        next_state=next_state_tuple,
+        reward=reward,
+        done=done,
+        info=info,
+        actions=ACTIONS,
+        agent_a=agent_a,
+        agent_b=agent_b,
+        epsilon=epsilon,
+    )
+
 
 def train_dqn_selfplay(
     env: WumpusChaseEnvExtended,
@@ -39,6 +82,9 @@ def train_dqn_selfplay(
     dqn_type: DQNType = DQNType.DUELING_DOUBLE,
     verbose: bool = True,
     save_path: Optional[str] = None,
+    logger: Optional["CSVLogger"] = None,
+    eval_logger: Optional["CSVLogger"] = None,
+    run_label: str = "dqn_selfplay",
 ) -> Dict[str, List]:
     """
     Train DQN agent in self-play mode.
@@ -127,6 +173,22 @@ def train_dqn_selfplay(
             next_state_tuple, reward, done, info = env.step(action_a, action_b)
             reward_b = float(info.get("reward_b", -reward))
             next_state = create_state_representation(next_state_tuple, env.size, env.layout)
+
+            _log_dqn_step(
+                logger,
+                run_label=run_label,
+                phase="train",
+                env=env,
+                episode=ep,
+                state_tuple=state_tuple,
+                action_a=action_a,
+                action_b=action_b,
+                next_state_tuple=next_state_tuple,
+                reward=reward,
+                done=done,
+                info=info,
+                epsilon=epsilon,
+            )
             
             # Store transitions for both agents
             ma_dqn.store_transition_a(state, action_a, reward, next_state, done)
@@ -139,6 +201,7 @@ def train_dqn_selfplay(
             
             episode_return += reward
             state = next_state
+            state_tuple = next_state_tuple
             
             if done:
                 break
@@ -150,7 +213,9 @@ def train_dqn_selfplay(
             # Evaluate with no exploration
             eval_stats = evaluate_dqn(
                 env, ma_dqn, n_episodes=eval_episodes,
-                state_dim=state_dim
+                state_dim=state_dim,
+                logger=eval_logger,
+                run_label=run_label,
             )
             
             logs["episode"].append(ep)
@@ -192,6 +257,9 @@ def train_dqn_vs_dqn(
     seed: int = 0,
     dqn_type: DQNType = DQNType.DUELING_DOUBLE,
     verbose: bool = True,
+    logger: Optional["CSVLogger"] = None,
+    eval_logger: Optional["CSVLogger"] = None,
+    run_label: str = "dqn_vs_dqn",
 ) -> Dict[str, List]:
     """
     Train two independent DQN agents against each other.
@@ -240,6 +308,22 @@ def train_dqn_vs_dqn(
             next_state_tuple, reward, done, info = env.step(action_a, action_b)
             reward_b = float(info.get("reward_b", -reward))
             next_state = create_state_representation(next_state_tuple, env.size, env.layout)
+
+            _log_dqn_step(
+                logger,
+                run_label=run_label,
+                phase="train",
+                env=env,
+                episode=ep,
+                state_tuple=state_tuple,
+                action_a=action_a,
+                action_b=action_b,
+                next_state_tuple=next_state_tuple,
+                reward=reward,
+                done=done,
+                info=info,
+                epsilon=epsilon,
+            )
             
             ma_dqn.store_transition_a(state, action_a, reward, next_state, done)
             ma_dqn.store_transition_b(state, action_b, reward_b, next_state, done)
@@ -247,11 +331,19 @@ def train_dqn_vs_dqn(
             ma_dqn.train_step()
             
             state = next_state
+            state_tuple = next_state_tuple
             if done:
                 break
         
         if ep % eval_every == 0:
-            eval_stats = evaluate_dqn(env, ma_dqn, n_episodes=eval_episodes, state_dim=state_dim)
+            eval_stats = evaluate_dqn(
+                env,
+                ma_dqn,
+                n_episodes=eval_episodes,
+                state_dim=state_dim,
+                logger=eval_logger,
+                run_label=run_label,
+            )
             
             logs["episode"].append(ep)
             logs["win_rate"].append(eval_stats.win_rate)
@@ -271,6 +363,8 @@ def evaluate_dqn(
     ma_dqn: MultiAgentDQN,
     n_episodes: int = 100,
     state_dim: int = None,
+    logger: Optional["CSVLogger"] = None,
+    run_label: str = "dqn_eval",
 ) -> EvalStats:
     """
     Evaluate DQN agent with no exploration.
@@ -283,7 +377,7 @@ def evaluate_dqn(
     total_steps = 0
     total_return = 0.0
     
-    for ep in range(n_episodes):
+    for ep in range(1, n_episodes + 1):
         state_tuple = env.reset()
         state = create_state_representation(state_tuple, env.size, env.layout)
         episode_return = 0.0
@@ -295,9 +389,26 @@ def evaluate_dqn(
             
             next_state_tuple, reward, done, info = env.step(action_a, action_b)
             next_state = create_state_representation(next_state_tuple, env.size, env.layout)
+
+            _log_dqn_step(
+                logger,
+                run_label=run_label,
+                phase="eval",
+                env=env,
+                episode=ep,
+                state_tuple=state_tuple,
+                action_a=action_a,
+                action_b=action_b,
+                next_state_tuple=next_state_tuple,
+                reward=reward,
+                done=done,
+                info=info,
+                epsilon=0.0,
+            )
             
             episode_return += reward
             state = next_state
+            state_tuple = next_state_tuple
             
             if done:
                 outcome = info.get("outcome", "B_WIN")

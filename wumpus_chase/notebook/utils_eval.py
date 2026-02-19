@@ -1,709 +1,828 @@
-"""Evaluation-specific analytics helpers for the Wumpus Chase project.
-Uses eval_episode_id to keep evaluation episodes unique even when episode
-counters restart across evaluation rounds.
-"""
+"""Evaluation analytics helpers for the extended Wumpus Chase logs."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Sequence
+from typing import Iterable, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 
-RESULTS_PATH = Path(__file__).resolve().parent.parent / "results" / "wumpus_eval.csv"
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
+EVAL_STEPS_PATH = RESULTS_DIR / "wumpus_extended_eval.csv"
+EVAL_MATRIX_PATH = RESULTS_DIR / "evaluation_results.csv"
+EVAL_REPORT_PATH = RESULTS_DIR / "evaluation_results_report.txt"
+
+TRUE_STRINGS = {"1", "true", "t", "yes", "y"}
 
 
-def load_runs(path: Path | str = RESULTS_PATH) -> Dict[str, pd.DataFrame]:
-    """Read the CSV log and return a dict of DataFrames keyed by run label."""
+def available_columns(path: Path | str) -> list[str]:
+    return pd.read_csv(path, nrows=0).columns.tolist()
+
+
+def list_run_labels(
+    path: Path | str = EVAL_STEPS_PATH,
+    phase: str = "eval",
+    chunksize: int = 300_000,
+) -> list[str]:
+    """List distinct run labels from the eval step log for a phase."""
     path = Path(path)
     if not path.exists():
-        raise FileNotFoundError(f"Results file not found: {path}")
-    df = pd.read_csv(path)
-    if "phase" in df.columns:
-        df = df.loc[df["phase"] == "eval"]
-    if "run_label" not in df.columns:
-        return {"run": df}
-    runs: Dict[str, pd.DataFrame] = {}
-    for run_name, g in df.groupby("run_label"):
-        runs[str(run_name)] = g.reset_index(drop=True)
-    return runs
+        raise FileNotFoundError(f"Eval steps file not found: {path}")
+
+    runs: set[str] = set()
+    usecols = ["run_label", "phase"]
+    for chunk in pd.read_csv(path, usecols=usecols, chunksize=chunksize):
+        sub = _filter_base_chunk(chunk, phase=phase, run_filter=None)
+        if sub.empty:
+            continue
+        runs.update(sub["run_label"].astype(str).dropna().unique().tolist())
+    return sorted(runs)
 
 
-def combine_runs(sheets: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Combine all run DataFrames into a single DataFrame with a 'run' column."""
-    dfs = []
-    for run_name, df in sheets.items():
-        df = df.copy()
-        df["run"] = run_name
-        dfs.append(df)
-    if not dfs:
-        return pd.DataFrame()
-    return pd.concat(dfs, ignore_index=True)
+def _coerce_bool(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False)
+    if pd.api.types.is_numeric_dtype(series):
+        return series.fillna(0).astype(float).ne(0)
+    text = series.astype(str).str.strip().str.lower()
+    return text.isin(TRUE_STRINGS)
 
 
-def _coerce_bool(df: pd.DataFrame, col: str) -> None:
-    if col in df.columns:
-        df[col] = df[col].fillna(False).astype(bool)
-
-
-def _attach_eval_episode_id(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty or "step" not in df.columns:
-        return df
-    base = df.copy()
-    if "run" not in base.columns and "run_label" in base.columns:
-        base["run"] = base["run_label"]
-    base["_log_idx"] = np.arange(len(base))
-    group_cols = ["run"]
-    if "p_fail" in base.columns:
-        group_cols.append("p_fail")
-
-    def _per_group(g: pd.DataFrame) -> pd.DataFrame:
-        g = g.sort_values("_log_idx")
-        starts = g["step"].eq(1)
-        g["eval_episode_id"] = starts.cumsum()
-        return g
-
-    out = base.groupby(group_cols, group_keys=False).apply(_per_group)
-    return out.drop(columns=["_log_idx"])
-
-
-def add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Add helpful derived columns to a step-level eval DataFrame."""
-    if df.empty:
-        return df
+def _ensure_bool(df: pd.DataFrame, cols: Sequence[str]) -> pd.DataFrame:
     out = df.copy()
-    if "run" not in out.columns and "run_label" in out.columns:
-        out["run"] = out["run_label"]
-
-    out["step"] = out["step"].astype(int)
-    out["episode"] = out["episode"].astype(int)
-
-    out["a_x"] = out["state_ax"]
-    out["a_y"] = out["state_ay"]
-    out["b_x"] = out["state_bx"]
-    out["b_y"] = out["state_by"]
-    out["a_x_next"] = out["next_state_ax"]
-    out["a_y_next"] = out["next_state_ay"]
-    out["b_x_next"] = out["next_state_bx"]
-    out["b_y_next"] = out["next_state_by"]
-
-    if "action_a_name" in out.columns:
-        out["a_action"] = out["action_a_name"]
-    else:
-        out["a_action"] = out["action_a"]
-    if "action_b_name" in out.columns:
-        out["b_action"] = out["action_b_name"]
-    else:
-        out["b_action"] = out["action_b"]
-    out["a_action"] = out["a_action"].astype("category")
-    out["b_action"] = out["b_action"].astype("category")
-
-    _coerce_bool(out, "capture")
-    _coerce_bool(out, "done")
-    _coerce_bool(out, "a_fail")
-    _coerce_bool(out, "b_fail")
-    _coerce_bool(out, "a_dead")
-    _coerce_bool(out, "b_dead")
-    _coerce_bool(out, "a_treasure")
-    _coerce_bool(out, "b_treasure")
-
-    out["a_win"] = out["outcome"] == "A_WIN"
-    out["b_win"] = out["outcome"] == "B_WIN"
-    out["draw"] = out["outcome"] == "DRAW"
-
-    out["manhattan_dist"] = (
-        (out["a_x"] - out["b_x"]).abs()
-        + (out["a_y"] - out["b_y"]).abs()
-    )
-
-    out = _attach_eval_episode_id(out)
+    for col in cols:
+        if col in out.columns:
+            out[col] = _coerce_bool(out[col])
     return out
 
 
-def episode_metrics(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute episode-level aggregates per unique eval_episode_id."""
-    if df.empty:
-        return pd.DataFrame()
-    keys = ["run", "eval_episode_id"]
-    if "p_fail" in df.columns:
-        keys = ["run", "p_fail", "eval_episode_id"]
-    agg = (
-        df.groupby(keys, as_index=False)
-        .agg(
-            episode=("episode", "first"),
-            captured=("capture", "max"),
-            steps=("step", "max"),
-            total_return=("reward", "sum"),
-            a_win=("a_win", "max"),
-            b_win=("b_win", "max"),
-            draw=("draw", "max"),
-            eval_episode_id=("eval_episode_id", "first"),
-        )
-    )
-    return agg
+def _ensure_numeric(df: pd.DataFrame, cols: Sequence[str]) -> pd.DataFrame:
+    out = df.copy()
+    for col in cols:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    return out
 
 
-def capture_rate_by_run(
-    ep_df: pd.DataFrame,
-    include_seed: bool = True,
-    include_eval_round: bool = False,
+def _filter_base_chunk(
+    chunk: pd.DataFrame,
+    phase: Optional[str],
+    run_filter: Optional[Iterable[str]],
 ) -> pd.DataFrame:
-    """Summarize win and capture rates and averages per run."""
-    if ep_df.empty:
-        return pd.DataFrame()
-    keys = ["run"]
-    if "p_fail" in ep_df.columns:
-        keys.append("p_fail")
-    if include_seed and "env_seed" in ep_df.columns:
-        keys.append("env_seed")
-    if include_eval_round and "eval_at_episode" in ep_df.columns:
-        keys.append("eval_at_episode")
-    grp = ep_df.groupby(keys, as_index=False)
-    return grp.agg(
-        a_win_rate=("a_win", "mean"),
-        b_win_rate=("b_win", "mean"),
-        draw_rate=("draw", "mean"),
-        capture_rate=("captured", "mean"),
-        avg_steps=("steps", "mean"),
-        avg_return=("total_return", "mean"),
-        eval_episode_id=("eval_episode_id", "mean"),
-    )
-
-
-def rolling_episode_metrics(ep_df: pd.DataFrame, window: int = 200) -> pd.DataFrame:
-    """Add rolling means of Chaser win rate, capture rate, steps, and return per run and p_fail."""
-    if ep_df.empty:
-        return ep_df
-    base = ep_df.copy()
-    if "p_fail" not in base.columns:
-        base["p_fail"] = None
-    if "eval_episode_id" not in base.columns:
-        base["eval_episode_id"] = base.groupby(["run", "p_fail"]).cumcount() + 1
-
-    def _add_roll(g: pd.DataFrame) -> pd.DataFrame:
-        g = g.sort_values("eval_episode_id")
-        g["roll_a_win_rate"] = g["a_win"].rolling(window, min_periods=3).mean()
-        g["roll_capture_rate"] = g["captured"].rolling(window, min_periods=3).mean()
-        g["roll_steps"] = g["steps"].rolling(window, min_periods=3).mean()
-        g["roll_return"] = g["total_return"].rolling(window, min_periods=3).mean()
-        return g
-
-    return base.groupby(["run", "p_fail"], group_keys=False).apply(_add_roll)
-
-
-def rolling_action_mix(df: pd.DataFrame, who: str = "a", window: int = 200) -> pd.DataFrame:
-    """Rolling action distribution over eval_episode_id per run and p_fail."""
-    if df.empty:
-        return pd.DataFrame()
-    col = f"{who}_action"
-    if col not in df.columns:
-        return pd.DataFrame()
-    base = df.copy()
-    if "p_fail" not in base.columns:
-        base["p_fail"] = None
-    if "eval_episode_id" not in base.columns:
-        base = _attach_eval_episode_id(base)
-
-    def _per_group(g: pd.DataFrame) -> pd.DataFrame:
-        counts = (
-            g.groupby(["eval_episode_id", col])
-            .size()
-            .reset_index(name="count")
-            .pivot(index="eval_episode_id", columns=col, values="count")
-            .fillna(0)
-        )
-        roll = counts.rolling(window, min_periods=1).sum()
-        frac = roll.div(roll.sum(axis=1), axis=0)
-        frac = frac.reset_index().melt(id_vars="eval_episode_id", var_name="action", value_name="frac")
-        return frac
-
-    out = (
-        base.groupby(["run", "p_fail"], group_keys=True)
-        .apply(_per_group)
-        .reset_index(level=[0, 1])
-        .rename(columns={"run": "run", "p_fail": "p_fail"})
-    )
+    out = chunk
+    if phase and "phase" in out.columns:
+        out = out.loc[out["phase"].astype(str).str.lower() == phase.lower()]
+    if run_filter and "run_label" in out.columns:
+        keep = {str(x) for x in run_filter}
+        out = out.loc[out["run_label"].astype(str).isin(keep)]
     return out
 
 
-def rolling_return_quantiles(
-    ep_df: pd.DataFrame,
-    window: int = 200,
-    quantiles: Sequence[float] = (0.1, 0.5, 0.9),
+def load_step_sample(
+    path: Path | str = EVAL_STEPS_PATH,
+    run_filter: Optional[Iterable[str]] = None,
+    phase: str = "eval",
+    usecols: Optional[Sequence[str]] = None,
+    chunksize: int = 200_000,
+    sample_frac: float = 0.05,
+    max_rows: int = 250_000,
+    random_state: int = 42,
 ) -> pd.DataFrame:
-    """Rolling quantiles of total_return per run and p_fail ordered by eval_episode_id."""
-    if ep_df.empty:
+    """Load a sampled subset from the large eval step CSV."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Eval steps file not found: {path}")
+
+    rng = np.random.default_rng(random_state)
+    chunks = []
+    collected = 0
+
+    for chunk in pd.read_csv(path, usecols=usecols, chunksize=chunksize):
+        sub = _filter_base_chunk(chunk, phase=phase, run_filter=run_filter)
+        if sub.empty:
+            continue
+        if sample_frac < 1.0 and len(sub) > 0:
+            keep_n = max(1, int(len(sub) * sample_frac))
+            idx = rng.choice(sub.index.to_numpy(), size=min(keep_n, len(sub)), replace=False)
+            sub = sub.loc[idx]
+        chunks.append(sub)
+        collected += len(sub)
+        if collected >= max_rows:
+            break
+
+    if not chunks:
         return pd.DataFrame()
-    base = ep_df.copy()
-    if "p_fail" not in base.columns:
-        base["p_fail"] = None
-    if "eval_episode_id" not in base.columns:
-        base["eval_episode_id"] = base.groupby(["run", "p_fail"]).cumcount() + 1
-
-    def _per_group(g: pd.DataFrame) -> pd.DataFrame:
-        g = g.sort_values("eval_episode_id").set_index("eval_episode_id")
-        rows = []
-        for q in quantiles:
-            series = g["total_return"].rolling(window, min_periods=3).quantile(q)
-            rows.append(series.rename(q))
-        res = pd.concat(rows, axis=1).reset_index()
-        return res.melt(id_vars="eval_episode_id", var_name="quantile", value_name="value")
-
-    out = (
-        base.groupby(["run", "p_fail"], group_keys=True)
-        .apply(_per_group)
-        .reset_index(level=[0, 1])
-        .rename(columns={"run": "run", "p_fail": "p_fail"})
-    )
-    return out
+    out = pd.concat(chunks, ignore_index=True)
+    if len(out) > max_rows:
+        out = out.sample(n=max_rows, random_state=random_state)
+    return out.reset_index(drop=True)
 
 
-def plot_run_trends(ep_df: pd.DataFrame, run: str, window: int = 50, title_prefix: Optional[str] = None) -> None:
-    """Plot rolling Chaser win rate and steps for a given run ordered by eval_episode_id."""
-    run_df = ep_df.loc[ep_df["run"] == run]
-    if run_df.empty:
-        print(f"No episode data for run={run}")
-        return
-    roll_df = rolling_episode_metrics(run_df, window=window)
-    ttl = title_prefix or run
-    fig = make_subplots(
-        rows=1,
-        cols=2,
-        subplot_titles=(f"{ttl} - Rolling win rate", f"{ttl} - Rolling steps"),
-        shared_xaxes=True,
+def load_eval_matrix(path: Path | str = EVAL_MATRIX_PATH) -> pd.DataFrame:
+    """Load pairwise evaluation table (agent_a vs agent_b)."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Evaluation matrix not found: {path}")
+    df = pd.read_csv(path)
+    numeric = [
+        "wins_a",
+        "wins_b",
+        "draws",
+        "total_games",
+        "win_rate_a",
+        "win_rate_b",
+        "draw_rate",
+        "avg_steps",
+        "avg_return",
+    ]
+    return _ensure_numeric(df, [c for c in numeric if c in df.columns])
+
+
+def load_eval_report(path: Path | str = EVAL_REPORT_PATH) -> str:
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Evaluation text report not found: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def leaderboard_from_matrix(matrix_df: pd.DataFrame) -> pd.DataFrame:
+    """Average win rates by agent across both A/B roles."""
+    if matrix_df.empty:
+        return pd.DataFrame()
+    rows = []
+    for _, row in matrix_df.iterrows():
+        rows.append({"agent": row["agent_a"], "role": "A", "win_rate": row.get("win_rate_a", np.nan)})
+        rows.append({"agent": row["agent_b"], "role": "B", "win_rate": row.get("win_rate_b", np.nan)})
+    out = pd.DataFrame(rows)
+    return (
+        out.groupby("agent", as_index=False)
+        .agg(avg_win_rate=("win_rate", "mean"), samples=("win_rate", "count"))
+        .sort_values("avg_win_rate", ascending=False)
     )
-    p_fails = (
-        sorted(roll_df["p_fail"].dropna().unique().tolist())
-        if "p_fail" in roll_df
-        else [None]
+
+
+def pivot_matrix(matrix_df: pd.DataFrame, value: str = "win_rate_a") -> pd.DataFrame:
+    """Agent-vs-agent pivot table."""
+    if matrix_df.empty:
+        return pd.DataFrame()
+    if value not in matrix_df.columns:
+        raise ValueError(f"Column '{value}' not found in matrix data.")
+    return matrix_df.pivot(index="agent_a", columns="agent_b", values=value)
+
+
+def plot_matrix_heatmap(matrix_df: pd.DataFrame, value: str = "win_rate_a"):
+    """Heatmap for pairwise matrix values."""
+    mat = pivot_matrix(matrix_df, value=value)
+    if mat.empty:
+        print("No matrix data.")
+        return None
+    fig = px.imshow(
+        mat,
+        text_auto=".2f",
+        color_continuous_scale="RdYlGn",
+        zmin=0,
+        zmax=1,
+        title=f"Pairwise evaluation heatmap ({value})",
+        aspect="auto",
     )
-    for pf in p_fails:
-        sub = roll_df if pf is None else roll_df.loc[roll_df["p_fail"] == pf]
-        label = f"p_fail={pf}" if pf is not None else "p_fail=?"
-        fig.add_trace(
-            go.Scatter(x=sub["eval_episode_id"], y=sub["roll_a_win_rate"], mode="lines", name=label),
-            row=1,
-            col=1,
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=sub["eval_episode_id"], y=sub["roll_steps"], mode="lines", name=label
-            ),
-            row=1,
-            col=2,
-        )
-    fig.update_yaxes(title_text="Chaser win rate", range=[0, 1], row=1, col=1)
-    fig.update_yaxes(title_text="Steps", row=1, col=2)
-    fig.update_xaxes(title_text="Eval episode id", row=1, col=1)
-    fig.update_xaxes(title_text="Eval episode id", row=1, col=2)
-    fig.update_layout(
-        height=400,
-        width=1000,
-        legend_title_text=None,
-        template="plotly_white",
-        legend=dict(
-            orientation="v",
-            y=0.5,
-            yanchor="middle",
-            x=1.02,
-        ),
-        margin=dict(r=160),
-    )
+    fig.update_layout(template="plotly_white")
     fig.show()
-    return fig
+    return None
 
 
-def plot_action_drift(action_mix: pd.DataFrame, title: str) -> None:
-    """Plot rolling action fractions as stacked area chart using eval_episode_id."""
-    if action_mix.empty:
-        print("No action-mix data to plot.")
-        return
-    fig = px.area(
-        action_mix,
-        x="eval_episode_id",
-        y="frac",
-        color="action",
-        title=title,
-        labels={"eval_episode_id": "Eval episode id", "frac": "Action fraction (rolling)", "action": "Action"},
+def plot_leaderboard(leaderboard_df: pd.DataFrame):
+    """Bar chart of average win rate per agent."""
+    if leaderboard_df.empty:
+        print("No leaderboard data.")
+        return None
+    fig = px.bar(
+        leaderboard_df,
+        x="agent",
+        y="avg_win_rate",
+        text=leaderboard_df["avg_win_rate"].map(lambda v: f"{v:.3f}"),
+        title="Average win rate across both roles",
     )
     fig.update_yaxes(range=[0, 1])
     fig.update_layout(template="plotly_white")
     fig.show()
-    return fig
+    return None
 
 
-def visit_density(
-    df: pd.DataFrame,
-    who: str = "a",
-    capture_only: bool = False,
-    use_post_capture_pos: bool = False,
-) -> pd.DataFrame:
-    """Compute visit density grid for chaser or B."""
+def add_step_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add derived columns on eval step data."""
     if df.empty:
-        return pd.DataFrame()
-    base = df.copy()
-    if capture_only:
-        base = base.loc[base["capture"]]
-    if capture_only and use_post_capture_pos:
-        x_col = f"{who}_x_next"
-        y_col = f"{who}_y_next"
-    else:
-        x_col = f"{who}_x"
-        y_col = f"{who}_y"
-    if x_col not in base or y_col not in base:
-        return pd.DataFrame()
-    return base.pivot_table(index=x_col, columns=y_col, values="reward", aggfunc="count").fillna(0)
+        return df
 
+    out = df.copy()
+    if "run" not in out.columns and "run_label" in out.columns:
+        out["run"] = out["run_label"]
 
-def plot_visit_heatmaps(df: pd.DataFrame, run: str, p_fail: float) -> None:
-    """Heatmaps of visit density and capture locations for agents A and B."""
-    sub = df.loc[(df["run"] == run) & (df["p_fail"] == p_fail)]
-    if sub.empty:
-        print(f"No data for run={run}, p_fail={p_fail}")
-        return
-    grid_a_visit = visit_density(sub, who="a", capture_only=False)
-    grid_b_visit = visit_density(sub, who="b", capture_only=False)
-    cap_sub = sub.loc[sub["capture"]]
-    if not cap_sub.empty:
-        grid_capture = cap_sub.pivot_table(
-            index="b_x_next",
-            columns="b_y_next",
-            values="reward",
-            aggfunc="count",
-        ).fillna(0)
-    else:
-        grid_capture = pd.DataFrame()
-
-    grids = [
-        ("Chaser visits", grid_a_visit),
-        ("Runner visits", grid_b_visit),
-        ("Capture locations (Runner post-move)", grid_capture),
+    numeric_cols = [
+        "episode",
+        "step",
+        "t_max",
+        "p_fail",
+        "reward",
+        "reward_a",
+        "reward_b",
+        "state_ax",
+        "state_ay",
+        "state_bx",
+        "state_by",
+        "next_state_ax",
+        "next_state_ay",
+        "next_state_bx",
+        "next_state_by",
+        "layout_treasure_x",
+        "layout_treasure_y",
+        "layout_wumpus_x",
+        "layout_wumpus_y",
     ]
+    out = _ensure_numeric(out, numeric_cols)
 
-    colorbar_x = [0.31, 0.67, 1.03]
-    fig = make_subplots(
-        rows=1,
-        cols=3,
-        subplot_titles=[t for t, _ in grids],
-        horizontal_spacing=0.12,
+    bool_cols = [
+        "done",
+        "capture",
+        "a_dead",
+        "b_dead",
+        "a_treasure",
+        "b_treasure",
+        "a_fail",
+        "b_fail",
+        "a_in_pit",
+        "b_in_pit",
+        "a_met_wumpus",
+        "b_met_wumpus",
+        "a_breeze",
+        "b_breeze",
+        "a_stench",
+        "b_stench",
+    ]
+    out = _ensure_bool(out, bool_cols)
+
+    if "action_a_name" in out.columns:
+        out["a_action"] = out["action_a_name"]
+    elif "action_a" in out.columns:
+        out["a_action"] = out["action_a"]
+
+    if "action_b_name" in out.columns:
+        out["b_action"] = out["action_b_name"]
+    elif "action_b" in out.columns:
+        out["b_action"] = out["action_b"]
+
+    if {"state_ax", "state_ay", "state_bx", "state_by"}.issubset(out.columns):
+        out["dist_ab"] = (out["state_ax"] - out["state_bx"]).abs() + (out["state_ay"] - out["state_by"]).abs()
+
+    out["a_win"] = out.get("outcome", pd.Series(index=out.index, dtype=object)).eq("A_WIN")
+    out["b_win"] = out.get("outcome", pd.Series(index=out.index, dtype=object)).eq("B_WIN")
+    return out
+
+
+def classify_terminal_reason(df: pd.DataFrame) -> pd.DataFrame:
+    """Classify why each eval episode ended."""
+    if df.empty:
+        return df
+
+    out = df.copy()
+    out = _ensure_bool(
+        out,
+        [
+            "capture",
+            "a_treasure",
+            "b_treasure",
+            "a_dead",
+            "b_dead",
+            "a_in_pit",
+            "b_in_pit",
+            "a_met_wumpus",
+            "b_met_wumpus",
+        ],
     )
-    for idx, (title, grid) in enumerate(grids, start=1):
-        if grid.empty:
-            fig.add_annotation(
-                row=1,
-                col=idx,
-                text=f"{title}<br>(no data)",
-                showarrow=False,
-                font=dict(color="gray"),
-            )
+    out = _ensure_numeric(out, ["step", "t_max"])
+
+    reason = np.full(len(out), "other", dtype=object)
+
+    capture_mask = out.get("capture", False)
+    reason[capture_mask] = "capture"
+
+    b_treasure = out.get("b_treasure", False)
+    reason[~capture_mask & b_treasure] = "runner_treasure"
+
+    a_treasure = out.get("a_treasure", False)
+    reason[~capture_mask & ~b_treasure & a_treasure] = "chaser_treasure"
+
+    b_dead = out.get("b_dead", False)
+    runner_pit = b_dead & out.get("b_in_pit", False)
+    runner_wumpus = b_dead & out.get("b_met_wumpus", False)
+    reason[~capture_mask & ~b_treasure & ~a_treasure & runner_pit] = "runner_pit"
+    reason[~capture_mask & ~b_treasure & ~a_treasure & ~runner_pit & runner_wumpus] = "runner_wumpus"
+    reason[~capture_mask & ~b_treasure & ~a_treasure & ~runner_pit & ~runner_wumpus & b_dead] = "runner_hazard"
+
+    a_dead = out.get("a_dead", False)
+    chaser_pit = a_dead & out.get("a_in_pit", False)
+    chaser_wumpus = a_dead & out.get("a_met_wumpus", False)
+    reason[~capture_mask & ~b_treasure & ~a_treasure & chaser_pit] = "chaser_pit"
+    reason[~capture_mask & ~b_treasure & ~a_treasure & ~chaser_pit & chaser_wumpus] = "chaser_wumpus"
+    reason[~capture_mask & ~b_treasure & ~a_treasure & ~chaser_pit & ~chaser_wumpus & a_dead] = "chaser_hazard"
+
+    timeout_mask = (
+        out.get("outcome", pd.Series(index=out.index, dtype=object)).eq("B_WIN")
+        & out["t_max"].notna()
+        & out["step"].notna()
+        & out["step"].ge(out["t_max"])
+    )
+    reason[reason == "other"] = np.where(timeout_mask[reason == "other"], "timeout", reason[reason == "other"])
+
+    draw_mask = out.get("outcome", pd.Series(index=out.index, dtype=object)).eq("DRAW")
+    reason[draw_mask] = "draw"
+
+    out["terminal_reason"] = reason
+    out["winner"] = np.where(out.get("outcome", "").eq("A_WIN"), "A", np.where(out.get("outcome", "").eq("B_WIN"), "B", "DRAW"))
+    return out
+
+
+def extract_terminal_rows(
+    path: Path | str = EVAL_STEPS_PATH,
+    run_filter: Optional[Iterable[str]] = None,
+    phase: str = "eval",
+    chunksize: int = 200_000,
+    limit_episodes: Optional[int] = None,
+) -> pd.DataFrame:
+    """Stream eval CSV and keep only terminal rows (done=True)."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Eval steps file not found: {path}")
+
+    wanted = [
+        "run_label",
+        "phase",
+        "agent_a",
+        "agent_b",
+        "role_a",
+        "role_b",
+        "episode",
+        "step",
+        "p_fail",
+        "t_max",
+        "size",
+        "outcome",
+        "winner_role",
+        "done",
+        "capture",
+        "a_dead",
+        "b_dead",
+        "a_treasure",
+        "b_treasure",
+        "a_in_pit",
+        "b_in_pit",
+        "a_met_wumpus",
+        "b_met_wumpus",
+        "state_ax",
+        "state_ay",
+        "state_bx",
+        "state_by",
+        "next_state_ax",
+        "next_state_ay",
+        "next_state_bx",
+        "next_state_by",
+        "layout_treasure_x",
+        "layout_treasure_y",
+        "layout_wumpus_x",
+        "layout_wumpus_y",
+        "layout_obstacles",
+        "layout_pits",
+        "reward",
+        "reward_a",
+        "reward_b",
+        "reward_outcome",
+        "reward_step",
+        "reward_hazard",
+        "reward_bump",
+        "reward_perception",
+        "reward_obstacle",
+        "reward_chase",
+        "reward_treasure",
+    ]
+    header = set(available_columns(path))
+    usecols = [c for c in wanted if c in header]
+
+    rows = []
+    for chunk in pd.read_csv(path, usecols=usecols, chunksize=chunksize):
+        sub = _filter_base_chunk(chunk, phase=phase, run_filter=run_filter)
+        if sub.empty:
             continue
-        total = grid.values.sum()
-        vmax = grid.values.max() if grid.size else 1
-        heat = go.Heatmap(
+
+        if "done" in sub.columns:
+            done = _coerce_bool(sub["done"])
+            sub = sub.loc[done]
+        elif "outcome" in sub.columns:
+            sub = sub.loc[sub["outcome"].isin(["A_WIN", "B_WIN", "DRAW"])]
+        else:
+            continue
+
+        if sub.empty:
+            continue
+        rows.append(sub)
+
+    if not rows:
+        return pd.DataFrame()
+
+    out = pd.concat(rows, ignore_index=True)
+    if limit_episodes is not None and len(out) > limit_episodes:
+        if "run_label" in out.columns:
+            # Keep run coverage when limiting rows by using balanced sampling.
+            out = (
+                out.groupby("run_label", group_keys=False)
+                .apply(
+                    lambda g: g.sample(
+                        n=max(1, int(limit_episodes / max(1, out["run_label"].nunique()))),
+                        random_state=42,
+                    )
+                    if len(g) > max(1, int(limit_episodes / max(1, out["run_label"].nunique())))
+                    else g
+                )
+                .reset_index(drop=True)
+            )
+            if len(out) > limit_episodes:
+                out = out.sample(n=limit_episodes, random_state=42)
+        else:
+            out = out.sample(n=limit_episodes, random_state=42)
+
+    out = add_step_features(out)
+    out = classify_terminal_reason(out)
+
+    keys = ["run"] + (["p_fail"] if "p_fail" in out.columns else [])
+    out["eval_episode_id"] = out.groupby(keys).cumcount() + 1
+    return out.reset_index(drop=True)
+
+
+def terminal_reason_rates(
+    terminal_df: pd.DataFrame,
+    group_cols: Sequence[str] = ("run", "p_fail"),
+) -> pd.DataFrame:
+    if terminal_df.empty:
+        return pd.DataFrame()
+    base = terminal_df.copy()
+    keys = [c for c in group_cols if c in base.columns]
+    if not keys:
+        keys = ["run"] if "run" in base.columns else []
+    if not keys:
+        return pd.DataFrame()
+
+    counts = (
+        base.groupby(keys + ["terminal_reason"], as_index=False)
+        .size()
+        .rename(columns={"size": "episodes"})
+    )
+    totals = counts.groupby(keys, as_index=False)["episodes"].sum().rename(columns={"episodes": "total_episodes"})
+    out = counts.merge(totals, on=keys, how="left")
+    out["rate"] = out["episodes"] / out["total_episodes"]
+    return out.sort_values(keys + ["rate"], ascending=[True] * len(keys) + [False])
+
+
+def terminal_summary(terminal_df: pd.DataFrame) -> pd.DataFrame:
+    if terminal_df.empty:
+        return pd.DataFrame()
+
+    base = terminal_df.copy()
+    keys = ["run"]
+    if "p_fail" in base.columns:
+        keys.append("p_fail")
+
+    for col in ["step", "reward", "reward_a", "reward_b"]:
+        if col in base.columns:
+            base[col] = pd.to_numeric(base[col], errors="coerce")
+
+    base["a_win"] = base.get("outcome", pd.Series(index=base.index, dtype=object)).eq("A_WIN")
+    base["b_win"] = base.get("outcome", pd.Series(index=base.index, dtype=object)).eq("B_WIN")
+
+    agg = base.groupby(keys, as_index=False).agg(
+        episodes=("eval_episode_id", "count") if "eval_episode_id" in base.columns else ("terminal_reason", "count"),
+        a_win_rate=("a_win", "mean"),
+        b_win_rate=("b_win", "mean"),
+        capture_rate=("capture", "mean") if "capture" in base.columns else ("a_win", "mean"),
+        runner_treasure_rate=("terminal_reason", lambda s: (s == "runner_treasure").mean()),
+        timeout_rate=("terminal_reason", lambda s: (s == "timeout").mean()),
+        runner_hazard_rate=("terminal_reason", lambda s: s.isin(["runner_pit", "runner_wumpus", "runner_hazard"]).mean()),
+        chaser_hazard_rate=("terminal_reason", lambda s: s.isin(["chaser_pit", "chaser_wumpus", "chaser_hazard"]).mean()),
+        avg_steps=("step", "mean") if "step" in base.columns else ("a_win", "mean"),
+        avg_reward_a=("reward_a", "mean") if "reward_a" in base.columns else ("reward", "mean"),
+        avg_reward_b=("reward_b", "mean") if "reward_b" in base.columns else ("reward", "mean"),
+    )
+    return agg.sort_values("a_win_rate", ascending=False)
+
+
+def reward_component_summary(terminal_df: pd.DataFrame) -> pd.DataFrame:
+    if terminal_df.empty:
+        return pd.DataFrame()
+    cols = [
+        "reward_outcome",
+        "reward_step",
+        "reward_hazard",
+        "reward_bump",
+        "reward_perception",
+        "reward_obstacle",
+        "reward_chase",
+        "reward_treasure",
+    ]
+    existing = [c for c in cols if c in terminal_df.columns]
+    if not existing:
+        return pd.DataFrame()
+
+    base = terminal_df.copy()
+    base = _ensure_numeric(base, existing)
+    keys = ["run"]
+    if "p_fail" in base.columns:
+        keys.append("p_fail")
+
+    return base.groupby(keys, as_index=False)[existing].mean()
+
+
+def hazard_breakdown(terminal_df: pd.DataFrame) -> pd.DataFrame:
+    if terminal_df.empty:
+        return pd.DataFrame()
+
+    base = terminal_df.copy()
+    keys = ["run"]
+    if "p_fail" in base.columns:
+        keys.append("p_fail")
+
+    rows = []
+    for _, row in base.iterrows():
+        entry = {k: row[k] for k in keys}
+        if row.get("terminal_reason") in {"runner_pit", "runner_wumpus", "runner_hazard"}:
+            entry["side"] = "runner"
+            entry["hazard_type"] = (
+                "pit" if bool(row.get("b_in_pit", False)) else "wumpus" if bool(row.get("b_met_wumpus", False)) else "other"
+            )
+            rows.append(entry)
+        if row.get("terminal_reason") in {"chaser_pit", "chaser_wumpus", "chaser_hazard"}:
+            entry2 = {k: row[k] for k in keys}
+            entry2["side"] = "chaser"
+            entry2["hazard_type"] = (
+                "pit" if bool(row.get("a_in_pit", False)) else "wumpus" if bool(row.get("a_met_wumpus", False)) else "other"
+            )
+            rows.append(entry2)
+
+    if not rows:
+        return pd.DataFrame(columns=keys + ["side", "hazard_type", "episodes", "rate"])
+
+    hz = pd.DataFrame(rows)
+    counts = hz.groupby(keys + ["side", "hazard_type"], as_index=False).size().rename(columns={"size": "episodes"})
+    totals = counts.groupby(keys + ["side"], as_index=False)["episodes"].sum().rename(columns={"episodes": "hazard_total"})
+    out = counts.merge(totals, on=keys + ["side"], how="left")
+    out["rate"] = out["episodes"] / out["hazard_total"]
+    return out.sort_values(keys + ["side", "rate"], ascending=[True] * len(keys) + [True, False])
+
+
+def _parse_cells(serialized: object) -> list[tuple[int, int]]:
+    if serialized is None or (isinstance(serialized, float) and np.isnan(serialized)):
+        return []
+    text = str(serialized).strip()
+    if not text:
+        return []
+    out: list[tuple[int, int]] = []
+    for item in text.split(";"):
+        part = item.strip()
+        if not part or "," not in part:
+            continue
+        x_str, y_str = part.split(",", 1)
+        try:
+            out.append((int(x_str), int(y_str)))
+        except ValueError:
+            continue
+    return out
+
+
+def terminal_position_grid(
+    terminal_df: pd.DataFrame,
+    actor: str = "b",
+    use_next_state: bool = True,
+    reason_filter: Optional[Sequence[str]] = None,
+) -> pd.DataFrame:
+    if terminal_df.empty:
+        return pd.DataFrame()
+
+    base = terminal_df.copy()
+    if reason_filter:
+        keep = set(reason_filter)
+        base = base.loc[base["terminal_reason"].isin(keep)]
+    if base.empty:
+        return pd.DataFrame()
+
+    x_col = f"{'next_state_' if use_next_state else 'state_'}{actor}x"
+    y_col = f"{'next_state_' if use_next_state else 'state_'}{actor}y"
+    if x_col not in base.columns or y_col not in base.columns:
+        return pd.DataFrame()
+
+    return (
+        base.pivot_table(index=x_col, columns=y_col, values="terminal_reason", aggfunc="count")
+        .fillna(0)
+        .sort_index()
+        .sort_index(axis=1)
+    )
+
+
+def plot_terminal_reason_stacked(
+    reason_rates_df: pd.DataFrame,
+    title: str = "Evaluation terminal reason mix by run",
+):
+    if reason_rates_df.empty:
+        print("No terminal reason data.")
+        return None
+
+    base = reason_rates_df.copy()
+    x_col = "run"
+    if "p_fail" in base.columns:
+        base["run_pf"] = base["run"].astype(str) + " | p_fail=" + base["p_fail"].astype(str)
+        x_col = "run_pf"
+
+    fig = px.bar(
+        base,
+        x=x_col,
+        y="rate",
+        color="terminal_reason",
+        text=base["rate"].map(lambda v: f"{v:.2f}"),
+        title=title,
+        labels={"rate": "Rate", x_col: "Run"},
+    )
+    fig.update_layout(barmode="stack", template="plotly_white", legend_title_text="Terminal reason")
+    fig.update_yaxes(range=[0, 1])
+    fig.show()
+    return None
+
+
+def plot_terminal_heatmap(
+    terminal_df: pd.DataFrame,
+    run: str,
+    p_fail: Optional[float] = None,
+    actor: str = "b",
+    reason_filter: Optional[Sequence[str]] = None,
+):
+    sub = terminal_df.loc[terminal_df["run"] == run].copy()
+    if p_fail is not None and "p_fail" in sub.columns:
+        sub = sub.loc[sub["p_fail"] == p_fail]
+    if sub.empty:
+        print(f"No terminal rows for run={run}, p_fail={p_fail}")
+        return None
+
+    grid = terminal_position_grid(sub, actor=actor, use_next_state=True, reason_filter=reason_filter)
+    if grid.empty:
+        print("No terminal grid data after filtering.")
+        return None
+
+    first = sub.iloc[0]
+    obstacles = _parse_cells(first.get("layout_obstacles", ""))
+    pits = _parse_cells(first.get("layout_pits", ""))
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Heatmap(
             z=grid.values,
             x=grid.columns,
             y=grid.index,
             colorscale="Blues",
-            colorbar=dict(
-                title="Count",
-                x=colorbar_x[idx - 1],
-                len=0.75,
-                yanchor="middle",
-                xanchor="center",
-            ),
-            showscale=True,
+            colorbar=dict(title="Terminal count"),
         )
-        fig.add_trace(heat, row=1, col=idx)
-        fig.update_xaxes(title_text=None, row=1, col=idx)
-        fig.update_yaxes(title_text=None, row=1, col=idx, autorange="reversed")
-        annotations = list(fig.layout.annotations) if fig.layout.annotations else []
-        for i in range(grid.shape[0]):
-            for j in range(grid.shape[1]):
-                val = grid.values[i, j]
-                pct = (val / total * 100) if total > 0 else 0
-                norm = (val / vmax) if vmax > 0 else 0
-                txt_color = "#FFFFFF" if norm > 0.6 else "#0A0A0A"
-                annotations.append(
-                    dict(
-                        x=grid.columns[j],
-                        y=grid.index[i],
-                        text=f"<b>{int(val)}</b><br>({pct:.1f}%)",
-                        showarrow=False,
-                        font=dict(size=10, color=txt_color),
-                        xref=f"x{idx}",
-                        yref=f"y{idx}",
-                        xanchor="center",
-                        yanchor="middle",
-                    )
-                )
-        fig.update_layout(annotations=tuple(annotations))
-
-    fig.update_layout(
-        title=f"Run={run}, p_fail={p_fail} visit densities",
-        height=500,
-        width=1800,
-        template="plotly_white",
-        margin=dict(r=240),
     )
-    fig.show()
-    return fig
 
-
-def episode_trajectories(
-    df: pd.DataFrame,
-    run: str,
-    p_fail: float,
-    eval_episode_ids: Iterable[int],
-) -> pd.DataFrame:
-    """Slice the step-level data for selected eval_episode_id values."""
-    if df.empty:
-        return pd.DataFrame()
-    eid_set = set(int(eid) for eid in eval_episode_ids)
-    mask = (df["run"] == run) & (df["p_fail"] == p_fail) & (df["eval_episode_id"].isin(eid_set))
-    return df.loc[mask].copy()
-
-
-def plot_positions(df: pd.DataFrame, size: int | None = None) -> None:
-    """Plot chaser and B positions over steps for a filtered DataFrame."""
-    if df.empty:
-        print("No data to plot.")
-        return
-    if size is None and "size" in df.columns:
-        size = int(df["size"].mode().iloc[0])
-    if size is None:
-        size = 7
-    fig = go.Figure()
-    for eid, g in df.groupby("eval_episode_id"):
-        fig.add_trace(
-            go.Scatter(
-                x=g["a_y"],
-                y=g["a_x"],
-                mode="lines+markers",
-                name=f"Chaser eid{eid}",
-                line=dict(color="#1f77b4"),
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=g["b_y"],
-                y=g["b_x"],
-                mode="lines+markers",
-                name=f"Runner eid{eid}",
-                line=dict(color="#ff7f0e"),
-                opacity=0.8,
-            )
-        )
-    fig.update_xaxes(title_text="y", range=[-0.5, size - 0.5])
-    fig.update_yaxes(title_text="x", range=[-0.5, size - 0.5], autorange="reversed")
-    fig.update_layout(
-        title="Trajectories (y=col, x=row)",
-        width=650,
-        height=650,
-        legend=dict(title=None),
-        template="plotly_white",
-    )
-    fig.show()
-    return fig
-
-
-def animate_episode(
-    steps_df: pd.DataFrame,
-    run: str,
-    p_fail: float,
-    episode: int | None = None,
-    eval_episode_id: int | None = None,
-    capture_only: bool = True,
-    frame_ms: int = 700,
-):
-    """Animate a single eval episode within a run and p_fail."""
-    sub = steps_df[(steps_df["run"] == run) & (steps_df["p_fail"] == p_fail)].copy()
-    if sub.empty:
-        print(f"No data for run={run}, p_fail={p_fail}")
-        return
-    if "eval_episode_id" not in sub.columns:
-        sub = _attach_eval_episode_id(sub)
-    sub["step"] = sub["step"].astype(int)
-    size = int(sub["size"].mode().iloc[0]) if "size" in sub.columns else 7
-
-    if eval_episode_id is not None:
-        row = sub.loc[sub["eval_episode_id"] == eval_episode_id]
-        if row.empty:
-            print(f"Eval episode id {eval_episode_id} not found for run={run}, p_fail={p_fail}")
-            return
-        episode = int(row["episode"].iloc[0])
-    elif episode is None:
-        candidates = sub[["eval_episode_id", "capture"]].drop_duplicates()
-        if capture_only:
-            candidates = candidates.loc[candidates["capture"]]
-        if candidates.empty:
-            candidates = sub[["eval_episode_id"]].drop_duplicates()
-        pick = candidates.sample(1).iloc[0]
-        eval_episode_id = int(pick["eval_episode_id"])
-    if eval_episode_id is None:
-        eval_episode_id = int(sub["eval_episode_id"].iloc[0])
-
-    epi = sub[sub["eval_episode_id"] == eval_episode_id].copy()
-    if epi.empty:
-        print(f"Eval episode id {eval_episode_id} not found for run={run}, p_fail={p_fail}")
-        return
-    epi = epi.sort_values("step")
-
-    layout_row = epi.iloc[0]
-    obstacles = []
-    layout_obstacles = str(layout_row.get("layout_obstacles", "") or "")
-    for item in layout_obstacles.split(";"):
-        item = item.strip()
-        if not item:
-            continue
-        try:
-            x_str, y_str = item.split(",")
-            obstacles.append((int(x_str), int(y_str)))
-        except ValueError:
-            continue
-
-    static_traces = []
     if obstacles:
-        obs_x = [y for x, y in obstacles]
-        obs_y = [x for x, y in obstacles]
-        static_traces.append(
+        fig.add_trace(
             go.Scatter(
-                x=obs_x,
-                y=obs_y,
+                x=[y for x, y in obstacles],
+                y=[x for x, y in obstacles],
                 mode="markers",
-                marker=dict(symbol="square", size=18, color="#3b3b3b"),
-                name="Obstacle",
-                hovertemplate="Obstacle<extra></extra>",
+                marker=dict(symbol="square", color="#2f2f2f", size=12),
+                name="Obstacles",
+            )
+        )
+    if pits:
+        fig.add_trace(
+            go.Scatter(
+                x=[y for x, y in pits],
+                y=[x for x, y in pits],
+                mode="markers",
+                marker=dict(symbol="x", color="#8e44ad", size=12),
+                name="Pits",
             )
         )
 
-    if "layout_treasure_x" in epi.columns and "layout_treasure_y" in epi.columns:
-        try:
-            tx = int(layout_row["layout_treasure_x"])
-            ty = int(layout_row["layout_treasure_y"])
-        except (TypeError, ValueError):
-            tx = None
-            ty = None
-        if tx is not None and ty is not None:
-            static_traces.append(
+    if "layout_wumpus_x" in sub.columns and "layout_wumpus_y" in sub.columns:
+        wx = pd.to_numeric(first.get("layout_wumpus_x"), errors="coerce")
+        wy = pd.to_numeric(first.get("layout_wumpus_y"), errors="coerce")
+        if not np.isnan(wx) and not np.isnan(wy):
+            fig.add_trace(
                 go.Scatter(
-                    x=[ty],
-                    y=[tx],
+                    x=[int(wy)],
+                    y=[int(wx)],
                     mode="markers",
-                    marker=dict(
-                        symbol="star",
-                        size=18,
-                        color="#f1c40f",
-                        line=dict(color="#b7950b", width=1),
-                    ),
-                    name="Treasure",
-                    hovertemplate="Treasure<extra></extra>",
+                    marker=dict(symbol="diamond", size=14, color="#c0392b"),
+                    name="Wumpus",
                 )
             )
 
-    frames = []
-    last_row = None
-    for step in epi["step"].unique():
-        g = epi[epi["step"] == step].iloc[0]
-        last_row = g
-        chaser_trace = go.Scatter(
-            x=[g["a_y"]], y=[g["a_x"]], mode="markers",
-            marker=dict(color="red", size=16), name="Chaser",
-            hovertemplate="Row: %{y}<br>Col: %{x}<extra>Chaser</extra>",
-        )
-        runner_trace = go.Scatter(
-            x=[g["b_y"]], y=[g["b_x"]], mode="markers",
-            marker=dict(color="green", size=16), name="Runner",
-            hovertemplate="Row: %{y}<br>Col: %{x}<extra>Runner</extra>",
-        )
-        frames.append(
-            go.Frame(
-                data=static_traces + [chaser_trace, runner_trace],
-                name=str(step),
+    if "layout_treasure_x" in sub.columns and "layout_treasure_y" in sub.columns:
+        tx = pd.to_numeric(first.get("layout_treasure_x"), errors="coerce")
+        ty = pd.to_numeric(first.get("layout_treasure_y"), errors="coerce")
+        if not np.isnan(tx) and not np.isnan(ty):
+            fig.add_trace(
+                go.Scatter(
+                    x=[int(ty)],
+                    y=[int(tx)],
+                    mode="markers",
+                    marker=dict(symbol="star", size=14, color="#f1c40f"),
+                    name="Treasure",
+                )
             )
-        )
 
-    if last_row is not None and (bool(last_row.get("capture")) or bool(last_row.get("done"))):
-        final_step = int(last_row["step"]) + 1
-        chaser_trace = go.Scatter(
-            x=[last_row["a_y_next"]], y=[last_row["a_x_next"]],
-            mode="markers", marker=dict(color="red", size=16), name="Chaser",
-            hovertemplate="Row: %{y}<br>Col: %{x}<extra>Chaser</extra>",
-        )
-        runner_trace = go.Scatter(
-            x=[last_row["b_y_next"]], y=[last_row["b_x_next"]],
-            mode="markers", marker=dict(color="green", size=16), name="Runner",
-            hovertemplate="Row: %{y}<br>Col: %{x}<extra>Runner</extra>",
-        )
-        frames.append(
-            go.Frame(
-                data=static_traces + [chaser_trace, runner_trace],
-                name=str(final_step),
-            )
-        )
-
-    if not frames:
-        print(f"No steps to animate for eval episode {eval_episode_id}")
-        return
-
-    axis_common = dict(range=[0, size], tick0=0, dtick=1, tickmode="linear")
-    fig = go.Figure(
-        data=frames[0].data,
-        layout=go.Layout(
-            title=dict(
-                text=f"Animated trajectory <br>{run}, p_fail={p_fail}, eval id {eval_episode_id}",
-                x=0.5,
-                xanchor="center",
-            ),
-            xaxis=dict(**axis_common, title="Table Column"),
-            yaxis=dict(range=[size, 0], tick0=0, dtick=1, tickmode="linear", title="Table Row"),
-            updatemenus=[{
-                "type": "buttons",
-                "buttons": [
-                    {"label": "Play", "method": "animate",
-                     "args": [None, {"frame": {"duration": frame_ms, "redraw": True}, "fromcurrent": True}]},
-                    {"label": "Pause", "method": "animate",
-                     "args": [[None], {"frame": {"duration": 0}, "mode": "immediate", "transition": {"duration": 0}}]},
-                ]
-            }],
-            sliders=[{
-                "currentvalue": {"prefix": "Step: "},
-                "steps": [
-                    {"label": f.name, "method": "animate",
-                     "args": [[f.name], {"mode": "immediate", "frame": {"duration": 0, "redraw": True}}]}
-                    for f in frames
-                ],
-            }],
-            width=650,
-            height=650,
-        ),
-        frames=frames,
+    reason_label = ",".join(reason_filter) if reason_filter else "all terminal reasons"
+    fig.update_layout(
+        title=f"Eval terminal positions ({actor.upper()}) - {run}, p_fail={p_fail}, reasons={reason_label}",
+        xaxis_title="y",
+        yaxis_title="x",
+        yaxis=dict(autorange="reversed"),
+        template="plotly_white",
+        width=760,
+        height=620,
+        legend_title_text=None,
     )
     fig.show()
+    return None
 
 
+def plot_reward_components(terminal_df: pd.DataFrame):
+    summary = reward_component_summary(terminal_df)
+    if summary.empty:
+        print("No reward component data.")
+        return None
+
+    id_cols = ["run"] + (["p_fail"] if "p_fail" in summary.columns else [])
+    long = summary.melt(id_vars=id_cols, var_name="component", value_name="mean_value")
+    if "p_fail" in id_cols:
+        long["run_pf"] = long["run"].astype(str) + " | p_fail=" + long["p_fail"].astype(str)
+        x_col = "run_pf"
+    else:
+        x_col = "run"
+
+    fig = px.bar(
+        long,
+        x=x_col,
+        y="mean_value",
+        color="component",
+        barmode="group",
+        title="Eval: mean reward components at terminal steps",
+    )
+    fig.update_layout(template="plotly_white", legend_title_text="Component")
+    fig.show()
+    return None
+
+
+def plot_terminal_steps_hist(terminal_df: pd.DataFrame):
+    if terminal_df.empty or "step" not in terminal_df.columns:
+        print("No terminal step data.")
+        return None
+
+    fig = px.histogram(
+        terminal_df,
+        x="step",
+        color="terminal_reason",
+        barmode="stack",
+        nbins=40,
+        title="Eval terminal step distribution by reason",
+    )
+    fig.update_layout(template="plotly_white")
+    fig.show()
+    return None
 
 
 __all__ = [
-    "RESULTS_PATH",
-    "load_runs",
-    "combine_runs",
-    "add_derived_columns",
-    "episode_metrics",
-    "capture_rate_by_run",
-    "rolling_episode_metrics",
-    "rolling_action_mix",
-    "rolling_return_quantiles",
-    "plot_run_trends",
-    "plot_action_drift",
-    "visit_density",
-    "plot_visit_heatmaps",
-    "episode_trajectories",
-    "plot_positions",
-    "animate_episode",
+    "RESULTS_DIR",
+    "EVAL_STEPS_PATH",
+    "EVAL_MATRIX_PATH",
+    "EVAL_REPORT_PATH",
+    "available_columns",
+    "list_run_labels",
+    "load_step_sample",
+    "load_eval_matrix",
+    "load_eval_report",
+    "leaderboard_from_matrix",
+    "pivot_matrix",
+    "plot_matrix_heatmap",
+    "plot_leaderboard",
+    "add_step_features",
+    "classify_terminal_reason",
+    "extract_terminal_rows",
+    "terminal_reason_rates",
+    "terminal_summary",
+    "reward_component_summary",
+    "hazard_breakdown",
+    "terminal_position_grid",
+    "plot_terminal_reason_stacked",
+    "plot_terminal_heatmap",
+    "plot_reward_components",
+    "plot_terminal_steps_hist",
 ]
-

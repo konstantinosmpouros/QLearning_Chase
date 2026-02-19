@@ -390,6 +390,9 @@ def _run_matchup(
             seed=seed,
             dqn_type=_dqn_type_from_arg(dqn_type),
             verbose=not quiet,
+            logger=train_logger,
+            eval_logger=eval_logger,
+            run_label=matchup,
         )
     raise ValueError(f"Unknown matchup: {matchup}")
 
