@@ -13,8 +13,9 @@ class MinimaxQAgent:
     """
     Tabular Minimax-Q agent for a zero-sum game.
 
-    Row player (agent A) is trained with Q[s, a_row, a_col].
-    The column player (agent B) plays a best response.
+    Independent learners store Q[s, own_action, opponent_action].
+    This is a security-policy learner; zero-sum convergence assumptions do not
+    automatically apply to the legacy general-sum reward shaping.
     """
 
     def __init__(
@@ -58,19 +59,16 @@ class MinimaxQAgent:
         pi, _ = self._compute_policy(sid)
         if self.rng.random() < eps:
             return self.rng.randrange(A)
-        return int(np.random.choice(np.arange(A), p=pi))
+        return int(self.rng.choices(range(A), weights=pi, k=1)[0])
 
     def act_col(self, sid: int, eps: float) -> int:
-        """
-        Choose action for the column player while maximizing this agent's own payoff.
+        """Select the runner's own row policy.
 
-        This computes a robust mixed policy for the column side by solving maximin
-        on the transposed payoff matrix and sampling from that policy.
+        All independent-agent training loops call update with (own, opponent)
+        actions, including the runner. Therefore no transpose belongs here.
+        best_response_col remains the separate column response to a row payoff.
         """
-        if self.rng.random() < eps:
-            return self.rng.randrange(A)
-        pi_col, _ = solve_row_player_maximin(self.Q[sid].T)
-        return int(np.random.choice(np.arange(A), p=pi_col))
+        return self.act_row(sid, eps)
 
     def best_response_col(self, sid: int, pi: np.ndarray, eps: float) -> int:
         if self.rng.random() < eps:

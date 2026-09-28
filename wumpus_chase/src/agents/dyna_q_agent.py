@@ -124,6 +124,10 @@ class ProbabilisticTransitionModel:
         default_factory=lambda: defaultdict(set)
     )
     
+    # Grouped outcomes preserve terminal/nonterminal transitions even when the
+    # legacy position-only state maps them to the same next_state.
+    outcome_counts: Dict = field(default_factory=dict)
+
     def update(
         self,
         state: int,
@@ -134,6 +138,10 @@ class ProbabilisticTransitionModel:
         done: bool
     ) -> None:
         """Update the probabilistic model with an observed transition."""
+        outcomes = self.outcome_counts.setdefault((state, action_a, action_b), {})
+        outcome = (next_state, float(reward), bool(done))
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+
         # Update transition count
         trans_key = (state, action_a, action_b, next_state)
         self.transition_counts[trans_key] += 1
@@ -162,43 +170,12 @@ class ProbabilisticTransitionModel:
             return None
         return rng.choice(list(self.state_actions[state]))
     
-    def predict(
-        self,
-        state: int,
-        action_a: int,
-        action_b: int,
-        rng: random.Random
-    ) -> Optional[Tuple[int, float, bool]]:
-        """
-        Predict outcome by sampling from observed distribution.
-        Returns (next_state, expected_reward, done).
-        """
-        sa_key = (state, action_a, action_b)
-        
-        # Get all observed next states for this state-action
-        next_states = []
-        counts = []
-        for (s, a1, a2, ns), count in self.transition_counts.items():
-            if s == state and a1 == action_a and a2 == action_b:
-                next_states.append(ns)
-                counts.append(count)
-        
-        if not next_states:
+    def predict(self, state, action_a, action_b, rng):
+        """Sample a joint (next_state, reward, done) outcome by frequency."""
+        outcomes = self.outcome_counts.get((state, action_a, action_b), {})
+        if not outcomes:
             return None
-        
-        # Sample next state proportional to counts
-        total = sum(counts)
-        probs = [c / total for c in counts]
-        next_state = rng.choices(next_states, weights=probs, k=1)[0]
-        
-        # Get average reward
-        reward_sum, reward_count = self.reward_stats[sa_key]
-        avg_reward = reward_sum / reward_count if reward_count > 0 else 0.0
-        
-        # Get done flag for this transition
-        done = self.done_flags.get((state, action_a, action_b, next_state), False)
-        
-        return next_state, avg_reward, done
+        return rng.choices(list(outcomes), weights=list(outcomes.values()), k=1)[0]
 
 
 class DynaQAgent:

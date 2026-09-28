@@ -1,0 +1,16 @@
+Executing cell 1
+Executing cell 3
+Executing cell 5
+Executing cell 7
+Executing cell 8
+Executing cell 10
+Executing cell 12
+Executing cell 14
+........................................................................ [ 69%]
+................................                                         [100%]
+104 passed in 6.19s
+Executing cell 16
+Executing cell 18
+Executing cell 20
+Executing cell 22
+Executed all cells successfully: verification/smoke_executed.ipynb

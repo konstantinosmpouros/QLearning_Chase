@@ -12,3 +12,9 @@ data/*
 
 wumpus_chase/results/*
 chase/results/*
+# Version the tested notebook, not local training outputs
+!notebooks/Chase_Population_Robustness_Tested.ipynb
+chase_population_runs/
+.pytest_cache/
+.coverage
+verification/smoke_executed.ipynb

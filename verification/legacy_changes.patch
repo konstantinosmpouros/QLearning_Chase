@@ -1,0 +1,238 @@
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,14 +1,20 @@
+-.env
+-.vscode/*
+-.virtual_documents/*
+-.idea/*
+-
+-**/__pycache__/
+-**/agent_venv/
+-**/.ipynb_checkpoints/
+-
+-notebooks/*
+-data/*
+-
+-wumpus_chase/results/*
+-chase/results/*+.env
++.vscode/*
++.virtual_documents/*
++.idea/*
++
++**/__pycache__/
++**/agent_venv/
++**/.ipynb_checkpoints/
++
++notebooks/*
++data/*
++
++wumpus_chase/results/*
++chase/results/*
++# Version the tested notebook, not local training outputs
++!notebooks/Chase_Population_Robustness_Tested.ipynb
++chase_population_runs/
++.pytest_cache/
++.coverage
++verification/smoke_executed.ipynb
+--- a/chase/src/agents/minimax_q_agent.py
++++ b/chase/src/agents/minimax_q_agent.py
+@@ -71,7 +71,7 @@
+         pi, _ = self._compute_policy(sid)
+         if self.rng.random() < eps:
+             return self.rng.randrange(A)
+-        return int(np.random.choice(np.arange(A), p=pi))
++        return int(self.rng.choices(range(A), weights=pi, k=1)[0])
+ 
+ 
+     def best_response_runner(self, sid: int, pi: np.ndarray, eps: float) -> int:
+--- a/wumpus_chase/src/agents/dqn_agent.py
++++ b/wumpus_chase/src/agents/dqn_agent.py
+@@ -19,7 +19,7 @@
+ 
+ import random
+ from collections import deque
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ from typing import List, Tuple, Optional, NamedTuple
+ from enum import Enum
+ 
+@@ -307,7 +307,7 @@
+         Returns:
+             Loss value if training occurred, None otherwise
+         """
+-        if len(self.replay_buffer) < self.config.min_buffer_size:
++        if len(self.replay_buffer) < max(self.config.min_buffer_size, self.config.batch_size):
+             return None
+         
+         # Sample batch
+@@ -389,7 +389,9 @@
+     
+     def load(self, path: str) -> None:
+         """Load model checkpoint."""
+-        checkpoint = torch.load(path, map_location=self.device)
++        # Only allow the two known metadata classes; keep weights-only loading.
++        with torch.serialization.safe_globals([DQNConfig, DQNType]):
++            checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+         self.q_network.load_state_dict(checkpoint['q_network'])
+         self.target_network.load_state_dict(checkpoint['target_network'])
+         self.optimizer.load_state_dict(checkpoint['optimizer'])
+@@ -447,20 +449,8 @@
+             self.agent = DQNAgent(config, seed=seed)
+         elif mode == "centralized":
+             # Extended state includes agent indicator
+-            config_extended = DQNConfig(
+-                state_dim=state_dim + 1,  # +1 for agent indicator
+-                action_dim=action_dim,
+-                hidden_dims=config.hidden_dims,
+-                dqn_type=config.dqn_type,
+-                gamma=config.gamma,
+-                learning_rate=config.learning_rate,
+-                batch_size=config.batch_size,
+-                eps_start=config.eps_start,
+-                eps_end=config.eps_end,
+-                eps_decay_steps=config.eps_decay_steps,
+-                buffer_size=config.buffer_size,
+-                target_update_freq=config.target_update_freq,
+-            )
++            # Preserve all settings, including warmup, tau and device.
++            config_extended = replace(config, state_dim=state_dim + 1)
+             self.agent = DQNAgent(config_extended, seed=seed)
+         else:
+             raise ValueError(f"Unknown mode: {mode}")
+--- a/wumpus_chase/src/agents/dyna_q_agent.py
++++ b/wumpus_chase/src/agents/dyna_q_agent.py
+@@ -124,6 +124,10 @@
+         default_factory=lambda: defaultdict(set)
+     )
+     
++    # Grouped outcomes preserve terminal/nonterminal transitions even when the
++    # legacy position-only state maps them to the same next_state.
++    outcome_counts: Dict = field(default_factory=dict)
++
+     def update(
+         self,
+         state: int,
+@@ -134,6 +138,10 @@
+         done: bool
+     ) -> None:
+         """Update the probabilistic model with an observed transition."""
++        outcomes = self.outcome_counts.setdefault((state, action_a, action_b), {})
++        outcome = (next_state, float(reward), bool(done))
++        outcomes[outcome] = outcomes.get(outcome, 0) + 1
++
+         # Update transition count
+         trans_key = (state, action_a, action_b, next_state)
+         self.transition_counts[trans_key] += 1
+@@ -162,43 +170,12 @@
+             return None
+         return rng.choice(list(self.state_actions[state]))
+     
+-    def predict(
+-        self,
+-        state: int,
+-        action_a: int,
+-        action_b: int,
+-        rng: random.Random
+-    ) -> Optional[Tuple[int, float, bool]]:
+-        """
+-        Predict outcome by sampling from observed distribution.
+-        Returns (next_state, expected_reward, done).
+-        """
+-        sa_key = (state, action_a, action_b)
+-        
+-        # Get all observed next states for this state-action
+-        next_states = []
+-        counts = []
+-        for (s, a1, a2, ns), count in self.transition_counts.items():
+-            if s == state and a1 == action_a and a2 == action_b:
+-                next_states.append(ns)
+-                counts.append(count)
+-        
+-        if not next_states:
++    def predict(self, state, action_a, action_b, rng):
++        """Sample a joint (next_state, reward, done) outcome by frequency."""
++        outcomes = self.outcome_counts.get((state, action_a, action_b), {})
++        if not outcomes:
+             return None
+-        
+-        # Sample next state proportional to counts
+-        total = sum(counts)
+-        probs = [c / total for c in counts]
+-        next_state = rng.choices(next_states, weights=probs, k=1)[0]
+-        
+-        # Get average reward
+-        reward_sum, reward_count = self.reward_stats[sa_key]
+-        avg_reward = reward_sum / reward_count if reward_count > 0 else 0.0
+-        
+-        # Get done flag for this transition
+-        done = self.done_flags.get((state, action_a, action_b, next_state), False)
+-        
+-        return next_state, avg_reward, done
++        return rng.choices(list(outcomes), weights=list(outcomes.values()), k=1)[0]
+ 
+ 
+ class DynaQAgent:
+--- a/wumpus_chase/src/agents/minimax_q_agent.py
++++ b/wumpus_chase/src/agents/minimax_q_agent.py
+@@ -13,8 +13,9 @@
+     """
+     Tabular Minimax-Q agent for a zero-sum game.
+ 
+-    Row player (agent A) is trained with Q[s, a_row, a_col].
+-    The column player (agent B) plays a best response.
++    Independent learners store Q[s, own_action, opponent_action].
++    This is a security-policy learner; zero-sum convergence assumptions do not
++    automatically apply to the legacy general-sum reward shaping.
+     """
+ 
+     def __init__(
+@@ -58,19 +59,16 @@
+         pi, _ = self._compute_policy(sid)
+         if self.rng.random() < eps:
+             return self.rng.randrange(A)
+-        return int(np.random.choice(np.arange(A), p=pi))
++        return int(self.rng.choices(range(A), weights=pi, k=1)[0])
+ 
+     def act_col(self, sid: int, eps: float) -> int:
++        """Select the runner's own row policy.
++
++        All independent-agent training loops call update with (own, opponent)
++        actions, including the runner. Therefore no transpose belongs here.
++        best_response_col remains the separate column response to a row payoff.
+         """
+-        Choose action for the column player while maximizing this agent's own payoff.
+-
+-        This computes a robust mixed policy for the column side by solving maximin
+-        on the transposed payoff matrix and sampling from that policy.
+-        """
+-        if self.rng.random() < eps:
+-            return self.rng.randrange(A)
+-        pi_col, _ = solve_row_player_maximin(self.Q[sid].T)
+-        return int(np.random.choice(np.arange(A), p=pi_col))
++        return self.act_row(sid, eps)
+ 
+     def best_response_col(self, sid: int, pi: np.ndarray, eps: float) -> int:
+         if self.rng.random() < eps:
+--- a/wumpus_chase/src/train/dqn_training.py
++++ b/wumpus_chase/src/train/dqn_training.py
+@@ -89,8 +89,9 @@
+     """
+     Train DQN agent in self-play mode.
+     
+-    Single MultiAgentDQN agent controls both players, learning
+-    optimal strategies through self-play.
++    One shared network controls both players with an explicit role indicator.
++    Wumpus capture/timeout rules are asymmetric: swapping coordinates does not
++    produce an equivalent decision problem for the runner.
+     
+     Args:
+         env: Wumpus Chase environment
+@@ -131,7 +132,7 @@
+     ma_dqn = MultiAgentDQN(
+         state_dim=state_dim,
+         action_dim=len(ACTIONS),
+-        mode="self_play",
++        mode="centralized",
+         config=config,
+         seed=seed,
+     )

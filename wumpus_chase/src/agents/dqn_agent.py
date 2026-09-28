@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import random
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Tuple, Optional, NamedTuple
 from enum import Enum
 
@@ -307,7 +307,7 @@ class DQNAgent:
         Returns:
             Loss value if training occurred, None otherwise
         """
-        if len(self.replay_buffer) < self.config.min_buffer_size:
+        if len(self.replay_buffer) < max(self.config.min_buffer_size, self.config.batch_size):
             return None
         
         # Sample batch
@@ -389,7 +389,9 @@ class DQNAgent:
     
     def load(self, path: str) -> None:
         """Load model checkpoint."""
-        checkpoint = torch.load(path, map_location=self.device)
+        # Only allow the two known metadata classes; keep weights-only loading.
+        with torch.serialization.safe_globals([DQNConfig, DQNType]):
+            checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         self.q_network.load_state_dict(checkpoint['q_network'])
         self.target_network.load_state_dict(checkpoint['target_network'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
@@ -447,20 +449,8 @@ class MultiAgentDQN:
             self.agent = DQNAgent(config, seed=seed)
         elif mode == "centralized":
             # Extended state includes agent indicator
-            config_extended = DQNConfig(
-                state_dim=state_dim + 1,  # +1 for agent indicator
-                action_dim=action_dim,
-                hidden_dims=config.hidden_dims,
-                dqn_type=config.dqn_type,
-                gamma=config.gamma,
-                learning_rate=config.learning_rate,
-                batch_size=config.batch_size,
-                eps_start=config.eps_start,
-                eps_end=config.eps_end,
-                eps_decay_steps=config.eps_decay_steps,
-                buffer_size=config.buffer_size,
-                target_update_freq=config.target_update_freq,
-            )
+            # Preserve all settings, including warmup, tau and device.
+            config_extended = replace(config, state_dim=state_dim + 1)
             self.agent = DQNAgent(config_extended, seed=seed)
         else:
             raise ValueError(f"Unknown mode: {mode}")
