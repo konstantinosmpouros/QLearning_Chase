@@ -89,8 +89,9 @@ def train_dqn_selfplay(
     """
     Train DQN agent in self-play mode.
     
-    Single MultiAgentDQN agent controls both players, learning
-    optimal strategies through self-play.
+    One shared network controls both players with an explicit role indicator.
+    Wumpus capture/timeout rules are asymmetric: swapping coordinates does not
+    produce an equivalent decision problem for the runner.
     
     Args:
         env: Wumpus Chase environment
@@ -131,7 +132,7 @@ def train_dqn_selfplay(
     ma_dqn = MultiAgentDQN(
         state_dim=state_dim,
         action_dim=len(ACTIONS),
-        mode="self_play",
+        mode="centralized",
         config=config,
         seed=seed,
     )

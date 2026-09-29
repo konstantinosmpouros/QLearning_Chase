@@ -1,0 +1,12 @@
+# PyTorch CPU can be installed separately with the command in TESTING.md.
+numpy>=1.24,<3
+scipy>=1.10,<2
+pandas>=2,<3
+matplotlib>=3.7,<4
+torch>=2.6,<3
+nashpy>=0.0.41,<0.1
+ipython>=8,<10
+pytest>=8,<10
+nbformat>=5.9,<6
+nbclient>=0.10,<1
+ipykernel>=6,<8

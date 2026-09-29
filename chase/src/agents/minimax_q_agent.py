@@ -71,7 +71,7 @@ class MinimaxQAgent:
         pi, _ = self._compute_policy(sid)
         if self.rng.random() < eps:
             return self.rng.randrange(A)
-        return int(np.random.choice(np.arange(A), p=pi))
+        return int(self.rng.choices(range(A), weights=pi, k=1)[0])
 
 
     def best_response_runner(self, sid: int, pi: np.ndarray, eps: float) -> int:
